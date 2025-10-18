@@ -1,0 +1,5 @@
+User
+id, name, email, balance, role (payer, merchant, admin)
+
+Transaction
+id, from_user_id, to_user_id, amount, timestamp, status (pending, settled, failed), offline_signed_token
