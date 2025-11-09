@@ -1,3 +1,4 @@
-from sqlalchemy.ext.declarative import declarative_base
+# Import Base from core.db to ensure single source of truth
+from app.core.db import Base
 
-Base=declarative_base()
+__all__ = ["Base"]

@@ -1,8 +1,8 @@
-# app/models/user.py
+# app/models.py
 from datetime import datetime
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
-from .base import Base
+from .core.db import Base
 
 class User(Base):
     __tablename__ = "users"
@@ -18,9 +18,8 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    # wallet/account fields (simple placeholders) - DEPRECATED: Use Wallet model instead
+    # wallet/account fields (simple placeholders)
     offline_balance = Column(Integer, default=0, nullable=False)
 
-    # relationships
+    # relationship to store refresh tokens
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
-    wallets = relationship("Wallet", back_populates="user", cascade="all, delete-orphan")
