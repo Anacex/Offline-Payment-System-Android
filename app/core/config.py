@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_ENABLED: bool = True
     RATE_LIMIT_PER_MINUTE: int = 30
 
+    # Database SSL toggle (true for managed DBs like Supabase; false for local)
+    REQUIRE_SSL: bool = True
+
     # Pydantic Config
     model_config = SettingsConfigDict(
         env_file=".env",

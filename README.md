@@ -108,6 +108,56 @@ Server runs at: `http://localhost:8000`
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 
+## 🐳 Docker & Cloud Deployment
+
+### Local development with Docker Compose
+
+Ship a consistent stack without installing Python or PostgreSQL locally:
+
+```bash
+docker compose up --build
+```
+
+This starts:
+- API at http://localhost:8000 (environment from `.env` if present)
+- PostgreSQL (user `postgres`, password `postgres`, database `offlinepay`) exposed on localhost:5432
+
+To run just the API container against a different database:
+
+```bash
+docker build -t offline-pay-backend .
+docker run --env-file .env -p 8000:8000 offline-pay-backend
+```
+
+### Deploying to Render (Docker service)
+
+Render can either run a managed Python service (installs requirements each deploy) or a Docker service (builds the same container you run locally). We ship a Docker-first workflow so every environment uses the same image.
+
+1. Push the repository (with `Dockerfile` and `render.yaml`) to GitHub.
+2. In Render → **New → Web Service**, pick your repo. Render reads `render.yaml`, builds the Docker image, and runs `uvicorn main:app --host 0.0.0.0 --port $PORT`.
+3. Set environment variables in Render (Dashboard → Environment):
+   - `DATABASE_URL` – Supabase Postgres connection string (SQLAlchemy format: `postgresql+psycopg2://user:pass@host:5432/db`)
+   - `SECRET_KEY` – strong random string (`openssl rand -hex 32`)
+   - `DEBUG` – `false`
+   - `REQUIRE_SSL` – `true`
+   - `CORS_ORIGINS` – comma-separated list of allowed front-end origins
+   - Optional: `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `RATE_LIMIT_ENABLED`, `RATE_LIMIT_PER_MINUTE`
+4. Deploy (Render auto-deploys on pushes to the tracked branch).
+
+### Supabase database setup
+
+1. In Supabase, create a project and copy the connection string (Project Settings → Database).
+2. (Optional) Rotate the password; update the connection string.
+3. Either:
+   - Let the API auto-create tables on startup (default via FastAPI startup hook), or
+   - Run locally with the Supabase URL and execute `python -m app.db_init` once.
+4. On Render, set `DATABASE_URL` to the Supabase connection string and keep `REQUIRE_SSL=true` so connections enforce TLS.
+
+### Render Docker vs. docker-compose (what’s the difference?)
+
+- **Render Docker service**: Production deployment. Render builds and runs your `Dockerfile` in the cloud. Ideal for a unified runtime across environments.
+- **docker-compose (local)**: Developer convenience to run API + Postgres locally. It spins up multiple containers on your workstation; Render doesn’t use this file directly.
+
 ## 📚 Documentation
 
 - **[API Documentation](API_DOCUMENTATION.md)** - Complete API reference
