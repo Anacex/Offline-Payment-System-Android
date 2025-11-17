@@ -24,7 +24,8 @@ def create_transaction(payload: TxCreate, db: Session = Depends(get_db)):
     if exists:
         raise HTTPException(status_code=409, detail="Duplicate reference")
 
-    tx = Transaction(**payload.model_dict())
+    # Pydantic model -> dict; use .dict() for compatibility with v1/v2
+    tx = Transaction(**payload.dict())
     db.add(tx)
     db.commit()
     db.refresh(tx)

@@ -23,7 +23,6 @@ from app.schemas.wallet import (
 router = APIRouter(
     prefix="/api/v1/offline-transactions",
     tags=["offline-transactions"],
-    dependencies=[Depends(get_current_user)]
 )
 
 
@@ -76,7 +75,8 @@ def create_offline_transaction_local(
         "receiver_public_key": receiver_qr_data["public_key"],
         "receiver_user_id": receiver_qr_data.get("user_id"),
         "receiver_wallet_id": receiver_qr_data.get("wallet_id"),
-        "amount": str(payload.amount),
+        # Format amount with two decimal places for consistent serialization
+        "amount": format(payload.amount, ".2f"),
         "currency": payload.currency,
         "nonce": nonce,
         "timestamp": payload.created_at_device.isoformat()

@@ -1,283 +1,82 @@
-# Offline Payment System - Backend API
+# Offline Payment System — Central README
 
-A secure banking backend that enables **offline money transfers** using asymmetric cryptography, digital signatures, and QR codes. Designed for integration with Pakistani banking apps like Meezan Bank.
+This is the canonical entry point for new contributors. It links to focused documentation for setup, testing, API reference, CI, and deployment.
 
-## 🎯 Core Concept
+## 📖 Full walk through of the project's documentation
+**→ [START_HERE.md](START_HERE.md)** — Complete documentation roadmap with learning paths for different roles (Backend, Frontend, DevOps, etc.), organized by topic and purpose. Start here if you're new to the project.
 
-Enable users to transfer money **without internet connectivity** through:
-- **Dual Wallet System**: Current (online) + Offline wallets
-- **Asymmetric Cryptography**: RSA 2048-bit encryption
-- **Digital Signatures**: Transaction verification
-- **QR Code Payments**: Scan receiver's QR to pay offline
-- **Receipt System**: Cryptographic proof of payment
-- **Ledger Sync**: Local ledger syncs to global when online
+## Quick links
 
-## 🏗️ Architecture
+- Overview & quick start: this README
+- **[Full documentation guide: START_HERE.md](START_HERE.md)** ← Start here for complete roadmap
+- API reference: API_DOCUMENTATION.md
+- Testing guide (unit & CI): TESTING.md
+- CI & secrets: CI_AND_SECRETS.md
+- Production deployment: PRODUCTION_DEPLOYMENT.md
+- Deploy checklist: DEPLOYMENT_CHECKLIST.md
+- Project index & additional docs: DOCUMENTATION_INDEX.md
+- Threat model & security: THREAT_MODEL.md
+- Mobile integration guide: MOBILE_APP_GUIDE.md
 
-```
-┌─────────────────┐         ┌──────────────────┐
-│  Mobile App     │◄────────┤  Backend API     │
-│  (Android)      │  HTTPS  │  (FastAPI)       │
-│                 │         │                  │
-│ • Local Ledger  │         │ • Global Ledger  │
-│ • Private Keys  │         │ • PostgreSQL DB  │
-│ • QR Scanner    │         │ • JWT Auth       │
-└─────────────────┘         └──────────────────┘
-      │                              │
-      │ Offline Transaction          │ Online Sync
-      ▼                              ▼
-┌─────────────────┐         ┌──────────────────┐
-│  Receiver       │         │  Blockchain      │
-│  (Nearby)       │         │  (Future)        │
-└─────────────────┘         └──────────────────┘
-```
+## Recommended first steps for a new developer
+1. Read [START_HERE.md](START_HERE.md) (5 min) — comprehensive documentation roadmap.
+2. Choose a learning path based on your role (Backend, Frontend, DevOps, etc.).
+3. Set up local environment (see the "Local setup" section below).
+4. Read `TESTING.md` and run the unit tests: `pytest -m unit -q`
+5. Explore `API_DOCUMENTATION.md` and open Swagger UI at `http://localhost:8000/docs` while running the server.
 
-## ✨ Features
+Local setup (minimal)
 
-### Security
-- ✅ RSA 2048-bit asymmetric encryption
-- ✅ Digital signatures (RSA-PSS + SHA-256)
-- ✅ Replay attack prevention (nonce-based)
-- ✅ Multi-factor authentication (MFA)
-- ✅ JWT access + refresh tokens
-- ✅ Device fingerprinting
-- ✅ Strong password policy
-- ✅ Receipt verification
+1. Create and activate a Python virtualenv (Windows PowerShell):
 
-### Wallet Management
-- ✅ Create current & offline wallets
-- ✅ Transfer between wallets (preload)
-- ✅ Balance tracking
-- ✅ Multi-currency support (PKR, USD, AED, SAR)
-- ✅ Transaction history
-
-### Offline Transactions
-- ✅ QR code generation
-- ✅ Offline transaction signing
-- ✅ Receipt generation
-- ✅ Local ledger updates
-- ✅ Sync when online
-- ✅ Transaction confirmation
-
-## 📋 Prerequisites
-
-- Python 3.10+
-- PostgreSQL 14+
-- pip (Python package manager)
-
-## 🚀 Quick Start
-
-### 1. Clone & Setup
-
-```bash
-cd backend-auth-pack
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### 2. Configure Database
+2. (Optional) Create a local `.env` with the essentials:
 
-Create PostgreSQL database:
-```sql
-CREATE DATABASE offlinepay;
+```
+DATABASE_URL=sqlite:///./local_dev.db
+SECRET_KEY=dev-secret-key
+DEBUG=true
 ```
 
-Set environment variables (or edit `app/core/config.py`):
-```bash
-export DATABASE_URL="postgresql+psycopg2://postgres:postgres@localhost:5432/offlinepay"
-export SECRET_KEY="your-super-secret-key-change-in-production"
-export ALGORITHM="HS256"
-export ACCESS_TOKEN_EXPIRE_MINUTES="15"
-```
+3. Initialize the database (creates tables):
 
-### 3. Initialize Database
-
-```bash
+```powershell
 python -m app.db_init
 ```
 
-### 4. Run Server
+4. Run the server:
 
-```bash
+```powershell
 uvicorn app.main:app --reload --port 8000
 ```
 
-Server runs at: `http://localhost:8000`
+Where to go next (documentation map)
 
-### 5. Access API Documentation
+- API docs: `API_DOCUMENTATION.md` — endpoints, request/response shapes.
+- Tests & test DB strategy: `TESTING.md` — run unit tests locally, explanation of the temp SQLite strategy we use for fast, safe unit tests.
+- CI & Secrets: `CI_AND_SECRETS.md` — what secrets to set in GitHub and CI pipeline overview.
+- Production deployment: `PRODUCTION_DEPLOYMENT.md` — detailed step-by-step production deployment guide (Nginx, systemd, SSL).
+- Quick deployment checklist: `DEPLOYMENT_CHECKLIST.md` — short list to follow before pushing to production.
+- Project index: `DOCUMENTATION_INDEX.md` — map of all documentation files.
 
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+Contributing
 
-## 🐳 Docker & Cloud Deployment
+1. Run unit tests before opening a PR: `pytest -m unit -q`.
+2. Keep changes small and focused.
+3. Update `DOCUMENTATION_INDEX.md` if you add new docs.
 
-### Local development with Docker Compose
+Need help?
 
-Ship a consistent stack without installing Python or PostgreSQL locally:
+Open an issue describing the problem or ask in the team chat and point to the failing test/logs. If you want, I can also move old/archived docs into an `archive_docs/` folder instead of deleting them.
 
-```bash
-docker compose up --build
-```
+---
 
-This starts:
-- API at http://localhost:8000 (environment from `.env` if present)
-- PostgreSQL (user `postgres`, password `postgres`, database `offlinepay`) exposed on localhost:5432
-
-To run just the API container against a different database:
-
-```bash
-docker build -t offline-pay-backend .
-docker run --env-file .env -p 8000:8000 offline-pay-backend
-```
-
-### Deploying to Render (Docker service)
-
-Render can either run a managed Python service (installs requirements each deploy) or a Docker service (builds the same container you run locally). We ship a Docker-first workflow so every environment uses the same image.
-
-1. Push the repository (with `Dockerfile` and `render.yaml`) to GitHub.
-2. In Render → **New → Web Service**, pick your repo. Render reads `render.yaml`, builds the Docker image, and runs `uvicorn main:app --host 0.0.0.0 --port $PORT`.
-3. Set environment variables in Render (Dashboard → Environment):
-   - `DATABASE_URL` – Supabase Postgres connection string (SQLAlchemy format: `postgresql+psycopg2://user:pass@host:5432/db`)
-   - `SECRET_KEY` – strong random string (`openssl rand -hex 32`)
-   - `DEBUG` – `false`
-   - `REQUIRE_SSL` – `true`
-   - `CORS_ORIGINS` – comma-separated list of allowed front-end origins
-   - Optional: `ACCESS_TOKEN_EXPIRE_MINUTES`, `REFRESH_TOKEN_EXPIRE_DAYS`, `RATE_LIMIT_ENABLED`, `RATE_LIMIT_PER_MINUTE`
-4. Deploy (Render auto-deploys on pushes to the tracked branch).
-
-### Supabase database setup
-
-1. In Supabase, create a project and copy the connection string (Project Settings → Database).
-2. (Optional) Rotate the password; update the connection string.
-3. Either:
-   - Let the API auto-create tables on startup (default via FastAPI startup hook), or
-   - Run locally with the Supabase URL and execute `python -m app.db_init` once.
-4. On Render, set `DATABASE_URL` to the Supabase connection string and keep `REQUIRE_SSL=true` so connections enforce TLS.
-
-### Render Docker vs. docker-compose (what’s the difference?)
-
-- **Render Docker service**: Production deployment. Render builds and runs your `Dockerfile` in the cloud. Ideal for a unified runtime across environments.
-- **docker-compose (local)**: Developer convenience to run API + Postgres locally. It spins up multiple containers on your workstation; Render doesn’t use this file directly.
-
-## 📚 Documentation
-
-- **[API Documentation](API_DOCUMENTATION.md)** - Complete API reference
-- **[Threat Model](THREAT_MODEL.md)** - Security analysis & threat mitigation
-- **[Swagger UI](http://localhost:8000/docs)** - Interactive API testing
-
-## 🔐 Authentication Flow
-
-```
-1. Sign Up → Email Verification
-2. Login → MFA (Email OTP)
-3. Receive Access Token + Refresh Token
-4. Use Bearer Token for API calls
-5. Refresh when token expires
-```
-
-**Example**:
-```bash
-# Sign up
-curl -X POST http://localhost:8000/auth/signup \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Ahmed","email":"ahmed@test.com","password":"SecurePass@123","phone":"+923001234567"}'
-
-# Login
-curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"ahmed@test.com","password":"SecurePass@123","device_fingerprint":"device-123"}'
-```
-
-## 💰 Wallet & Transaction Flow
-
-### 1. Create Wallets
-
-```bash
-# Create current wallet
-curl -X POST http://localhost:8000/api/v1/wallets/ \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"wallet_type":"current","currency":"PKR"}'
-
-# Create offline wallet (generates RSA keys)
-curl -X POST http://localhost:8000/api/v1/wallets/ \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"wallet_type":"offline","currency":"PKR"}'
-```
-
-### 2. Preload Offline Wallet
-
-```bash
-curl -X POST http://localhost:8000/api/v1/wallets/transfer \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"from_wallet_id":1,"to_wallet_id":2,"amount":"5000.00","currency":"PKR"}'
-```
-
-### 3. Generate QR Code (Receiver)
-
-```bash
-curl -X POST http://localhost:8000/api/v1/wallets/qr-code \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"wallet_id":2}'
-```
-
-### 4. Create Offline Transaction (Sender)
-
-```bash
-# Step 1: Prepare transaction
-curl -X POST http://localhost:8000/api/v1/offline-transactions/create-local \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "sender_wallet_id":2,
-    "receiver_qr_data":{...},
-    "amount":"500.00",
-    "currency":"PKR",
-    "device_fingerprint":"device-123",
-    "created_at_device":"2024-01-15T12:00:00"
-  }'
-
-# Step 2: Sign with private key (on mobile device)
-# Step 3: Store signed transaction
-curl -X POST http://localhost:8000/api/v1/offline-transactions/sign-and-store \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"transaction_data":{...},"signature":"..."}'
-```
-
-### 5. Sync When Online
-
-```bash
-curl -X POST http://localhost:8000/api/v1/offline-transactions/sync \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"transactions":[...]}'
-```
-
-## 🗂️ Project Structure
-
-```
-backend-auth-pack/
-├── app/
-│   ├── api/
-│   │   └── v1/
-│   │       ├── auth.py                 # Authentication endpoints
-│   │       ├── wallet.py               # Wallet management
-│   │       ├── offline_transaction.py  # Offline transactions
-│   │       ├── transaction.py          # Online transactions
-│   │       └── user.py                 # User management
-│   ├── core/
-│   │   ├── auth.py                     # Auth utilities
-│   │   ├── config.py                   # Configuration
-│   │   ├── crypto.py                   # Cryptography (RSA, signatures)
-│   │   ├── db.py                       # Database connection
-│   │   ├── deps.py                     # Dependencies
-│   │   └── security.py                 # Security utilities
-│   ├── models/
-│   │   ├── user.py                     # User model
-│   │   ├── wallet.py                   # Wallet models
+If this looks good I will delete the old archived docs to remove clutter (you asked for removal). If you'd prefer moving them to `archive_docs/` instead, tell me and I'll do that instead.
 │   │   ├── transaction.py              # Transaction model
 │   │   └── base.py                     # Base model
 │   ├── schemas/
