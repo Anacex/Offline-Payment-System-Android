@@ -14,6 +14,8 @@ if settings.DATABASE_URL.startswith("postgresql") and "sslmode=" not in settings
 engine = create_engine(
     settings.DATABASE_URL,
     future=True,
+    pool_pre_ping=True,        # prevents stale connection errors
+    pool_recycle=1800,         # recycle every 30 min (recommended for Render + Supabase)
     connect_args=connect_args if connect_args else {},
 )
 
