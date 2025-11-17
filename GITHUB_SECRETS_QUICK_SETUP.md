@@ -24,7 +24,7 @@ Copy the output (e.g., `a7f3e9c2b5d8a1f4e6c9b2d5a8f3e7c0b4d9f2e5a8c1b4d7f0e3a6c9
 
 **First Secret:**
   ```
-  postgresql://postgres.pnvgnapukrshnnxveogv:offlinepay123@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres
+  postgresql://postgres.pnvgnapukrshnnxveogv:[password]@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres
   ```
 
 **Second Secret:**
