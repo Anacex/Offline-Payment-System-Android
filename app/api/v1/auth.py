@@ -3,6 +3,15 @@ from fastapi import APIRouter, Depends, HTTPException, status, Body, Request
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import secrets
+import sys
+from pathlib import Path
+
+# Add project root to path for logging import
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from log_to_supabase import log_event
 
 from app.core import security
 from app.core.db import get_db
@@ -11,10 +20,8 @@ from app.models_refresh_token import RefreshToken
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# --- util functions (you can replace send_email with real SMTP) ---
-def send_email(recipient: str, subject: str, body: str):
-    # Replace with real email service in production
-    print(f"[EMAIL] To: {recipient} | Subject: {subject}\n{body}")
+# Import email service
+from app.core.email import send_email
 
 # Signup with strong password policy and email verification flow
 @router.post("/signup", status_code=201)
@@ -48,11 +55,71 @@ def signup(payload: dict = Body(...), db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    # create email verification token (short lived)
-    otp = secrets.token_urlsafe(8)
+    # create email verification token (short lived) - 6 digit numeric code
+    otp_code = secrets.randbelow(1000000)  # Generate 0-999999
+    otp = f"{otp_code:06d}"  # Format as 6-digit string with leading zeros
     # store OTP embedded in a server side cache in prod (Redis). For now, we "email" it and print.
     # In production, persist OTP with expiry in DB or Redis keyed by user id.
-    send_email(email, "Verify your email", f"Your verification code: {otp}")
+    
+    # Send verification email with formatted template
+    email_body = f"""
+Hello {name},
+
+Thank you for signing up for Offline Pay Service! Please verify your email address using the code below:
+
+Your verification code: {otp}
+
+This code will expire in 10 minutes.
+
+If you didn't create an account, please ignore this email.
+"""
+    
+    # HTML version for better formatting
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #4CAF50; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #f9f9f9; padding: 30px; border-radius: 0 0 5px 5px; }}
+            .otp-code {{ font-size: 32px; font-weight: bold; color: #4CAF50; text-align: center; 
+                        background-color: white; padding: 20px; margin: 20px 0; 
+                        border-radius: 5px; letter-spacing: 5px; }}
+            .footer {{ text-align: center; margin-top: 20px; color: #666; font-size: 12px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Email Verification</h1>
+            </div>
+            <div class="content">
+                <p>Hello <strong>{name}</strong>,</p>
+                <p>Thank you for signing up! Please verify your email address using the code below:</p>
+                <div class="otp-code">{otp}</div>
+                <p>This code will expire in <strong>10 minutes</strong>.</p>
+                <p>If you didn't create an account, please ignore this email.</p>
+            </div>
+            <div class="footer">
+                <p>Offline Payment System</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    send_email(email, "Verify your Offline Pay email address", email_body, html_body)
+
+    # Log OTP generation for team visibility
+    log_event("info", "Email verification OTP generated", {
+        "user_id": user.id,
+        "email": email,
+        "otp": otp,
+        "type": "email_verification",
+        "endpoint": "/auth/signup"
+    })
 
     # For demo we return a temporary token (do not do this in production).
     return {"msg": "User created. Check your email for verification code (demo prints).", "otp_demo": otp}
@@ -68,6 +135,17 @@ def verify_email(email: str = Body(...), otp: str = Body(...), db: Session = Dep
     user.is_email_verified = True
     db.add(user)
     db.commit()
+    
+    # Log OTP verification
+    log_event("info", "Email verification OTP verified", {
+        "user_id": user.id,
+        "email": email,
+        "otp": otp,
+        "type": "email_verification",
+        "endpoint": "/auth/verify-email",
+        "status": "verified"
+    })
+    
     return {"msg": "Email verified"}
 
 # Login step 1: credential check -> send MFA OTP
@@ -80,13 +158,79 @@ def login_step1(email: str = Body(...), password: str = Body(...), device_finger
     if not user.is_email_verified:
         raise HTTPException(status_code=401, detail="Email not verified")
 
-    # generate email MFA OTP
-    mfa_otp = secrets.token_hex(3)  # 6 hex chars
+    # generate email MFA OTP - 6 digit numeric code
+    mfa_otp_code = secrets.randbelow(1000000)  # Generate 0-999999
+    mfa_otp = f"{mfa_otp_code:06d}"  # Format as 6-digit string with leading zeros
     # In production save OTP in DB/Redis with expiry; here we print/send for demo
-    send_email(user.email, "Your login OTP", f"Your login code: {mfa_otp}")
+    
+    # Send login OTP email with formatted template
+    email_body = f"""
+Hello {user.name},
+
+You requested a login code. Use the code below to complete your login:
+
+Your login code: {mfa_otp}
+
+This code will expire in 10 minutes.
+
+If you didn't request this code, please ignore this email or contact support.
+"""
+    
+    # HTML version for better formatting
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #2196F3; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #f9f9f9; padding: 30px; border-radius: 0 0 5px 5px; }}
+            .otp-code {{ font-size: 32px; font-weight: bold; color: #2196F3; text-align: center; 
+                        background-color: white; padding: 20px; margin: 20px 0; 
+                        border-radius: 5px; letter-spacing: 5px; }}
+            .footer {{ text-align: center; margin-top: 20px; color: #666; font-size: 12px; }}
+            .warning {{ background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin: 15px 0; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Login Verification Code</h1>
+            </div>
+            <div class="content">
+                <p>Hello <strong>{user.name}</strong>,</p>
+                <p>You requested a login code. Use the code below to complete your login:</p>
+                <div class="otp-code">{mfa_otp}</div>
+                <p>This code will expire in <strong>10 minutes</strong>.</p>
+                <div class="warning">
+                    <p><strong>⚠️ Security Notice:</strong> If you didn't request this code, please ignore this email or contact support immediately.</p>
+                </div>
+            </div>
+            <div class="footer">
+                <p>Offline Payment System</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    send_email(user.email, "Your login verification code", email_body, html_body)
 
     # For demo return a temporary nonce token to validate OTP step (in prod you would save OTP.)
     nonce = secrets.token_urlsafe(16)
+    
+    # Log MFA OTP generation for team visibility
+    log_event("info", "Login MFA OTP generated", {
+        "user_id": user.id,
+        "email": user.email,
+        "otp": mfa_otp,
+        "nonce": nonce,
+        "type": "login_mfa",
+        "endpoint": "/auth/login",
+        "device_fingerprint": device_fingerprint
+    })
+    
     # store nonce->otp mapping temporarily in memory/cache in production
     # return nonce to client to pass back with OTP (demo)
     return {"nonce_demo": nonce, "otp_demo": mfa_otp}
@@ -107,6 +251,18 @@ def login_confirm(email: str = Body(...), otp: str = Body(...), nonce: str = Bod
     rt = RefreshToken(token=refresh_token, user_id=user.id, device_fingerprint=device_fingerprint, expires_at=expires_at)
     db.add(rt)
     db.commit()
+
+    # Log OTP verification and successful login
+    log_event("info", "Login MFA OTP verified - login successful", {
+        "user_id": user.id,
+        "email": email,
+        "otp": otp,
+        "nonce": nonce,
+        "type": "login_mfa",
+        "endpoint": "/auth/login/confirm",
+        "status": "verified",
+        "device_fingerprint": device_fingerprint
+    })
 
     return {"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token}
 

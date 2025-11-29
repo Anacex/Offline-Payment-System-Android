@@ -13,3 +13,4 @@ email-validator
 slowapi
 python-multipart
 asyncpg>=0.27.0
+httpx>=0.24.0
