@@ -119,32 +119,18 @@ If you didn't create an account, please ignore this email.
     """
     send_email(email, "Verify your Offline Pay email address", email_body, html_body)
 
-    # Log OTP generation for team visibility - CRITICAL: Must be logged
-    # Use blocking log with short timeout to avoid delaying response
-    otp_logged = False
-    try:
-        # Single attempt with short timeout - if it fails, use fire-and-forget
-        otp_logged = log_event_blocking("info", "Email verification OTP generated", {
-            "user_id": user.id,
-            "email": email,
-            "otp": otp,
-            "type": "email_verification",
-            "endpoint": "/auth/signup"
-        }, timeout=0.5)  # Very short timeout - fail fast to avoid delays
-    except Exception as e:
-        # If blocking fails, fall back to fire-and-forget
-        log_event("info", "Email verification OTP generated", {
-            "user_id": user.id,
-            "email": email,
-            "otp": otp,
-            "type": "email_verification",
-            "endpoint": "/auth/signup",
-            "fallback": True
-        })
-        print(f"[OTP LOG] Blocking log failed, using fire-and-forget: {e}")
+    # Log OTP generation for team visibility - Use fire-and-forget to avoid delays
+    # The OTP will be logged asynchronously, ensuring fast response times
+    log_event("info", "Email verification OTP generated", {
+        "user_id": user.id,
+        "email": email,
+        "otp": otp,
+        "type": "email_verification",
+        "endpoint": "/auth/signup"
+    })
     
-    # Always log to console as backup (even if Supabase logging succeeded)
-    print(f"[OTP LOG] Email verification OTP for {email}: {otp} (User ID: {user.id}, Supabase: {'✓' if otp_logged else '✗ (fire-and-forget)'})")
+    # Always log to console as backup
+    print(f"[OTP LOG] Email verification OTP for {email}: {otp} (User ID: {user.id})")
 
     # For demo we return a temporary token (do not do this in production).
     return {"msg": "User created. Check your email for verification code (demo prints).", "otp_demo": otp}
@@ -245,36 +231,20 @@ If you didn't request this code, please ignore this email or contact support.
     # For demo return a temporary nonce token to validate OTP step (in prod you would save OTP.)
     nonce = secrets.token_urlsafe(16)
     
-    # Log MFA OTP generation for team visibility - CRITICAL: Must be logged
-    # Use blocking log with short timeout to avoid delaying response
-    otp_logged = False
-    try:
-        # Single attempt with short timeout - if it fails, use fire-and-forget
-        otp_logged = log_event_blocking("info", "Login MFA OTP generated", {
-            "user_id": user.id,
-            "email": user.email,
-            "otp": mfa_otp,
-            "nonce": nonce,
-            "type": "login_mfa",
-            "endpoint": "/auth/login",
-            "device_fingerprint": device_fingerprint
-        }, timeout=0.5)  # Very short timeout - fail fast to avoid delays
-    except Exception as e:
-        # If blocking fails, fall back to fire-and-forget
-        log_event("info", "Login MFA OTP generated", {
-            "user_id": user.id,
-            "email": user.email,
-            "otp": mfa_otp,
-            "nonce": nonce,
-            "type": "login_mfa",
-            "endpoint": "/auth/login",
-            "device_fingerprint": device_fingerprint,
-            "fallback": True
-        })
-        print(f"[OTP LOG] Blocking log failed, using fire-and-forget: {e}")
+    # Log MFA OTP generation for team visibility - Use fire-and-forget to avoid delays
+    # The OTP will be logged asynchronously, ensuring fast response times
+    log_event("info", "Login MFA OTP generated", {
+        "user_id": user.id,
+        "email": user.email,
+        "otp": mfa_otp,
+        "nonce": nonce,
+        "type": "login_mfa",
+        "endpoint": "/auth/login",
+        "device_fingerprint": device_fingerprint
+    })
     
-    # Always log to console as backup (even if Supabase logging succeeded)
-    print(f"[OTP LOG] Login MFA OTP for {user.email}: {mfa_otp} (User ID: {user.id}, Supabase: {'✓' if otp_logged else '✗ (fire-and-forget)'})")
+    # Always log to console as backup
+    print(f"[OTP LOG] Login MFA OTP for {user.email}: {mfa_otp} (User ID: {user.id})")
     
     # store nonce->otp mapping temporarily in memory/cache in production
     # return nonce to client to pass back with OTP (demo)
