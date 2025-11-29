@@ -3,6 +3,7 @@ Email service module for sending OTP and verification emails.
 Supports multiple email providers with fallback options.
 """
 import os
+import asyncio
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -45,17 +46,26 @@ async def send_email_async(recipient: str, subject: str, body: str, html_body: O
         return False
 
 
+def _handle_email_task_exception(task: asyncio.Task) -> None:
+    """Handle exceptions in background email tasks to prevent 'Future exception was never retrieved' warnings"""
+    try:
+        task.result()  # This will raise if task had an exception
+    except (asyncio.CancelledError, Exception) as e:
+        # Silently ignore - email failures shouldn't break the app
+        # CancelledError is expected during shutdown
+        pass
+
 def send_email(recipient: str, subject: str, body: str, html_body: Optional[str] = None) -> bool:
     """
     Synchronous wrapper for send_email_async.
     Use this from sync code. Fire-and-forget in async contexts.
     """
-    import asyncio
     try:
         loop = asyncio.get_running_loop()
         # If we're in an async context, create a task (fire-and-forget)
         if loop and loop.is_running():
-            asyncio.create_task(send_email_async(recipient, subject, body, html_body))
+            task = asyncio.create_task(send_email_async(recipient, subject, body, html_body))
+            task.add_done_callback(_handle_email_task_exception)
             return True
     except RuntimeError:
         # No event loop running, create a new one

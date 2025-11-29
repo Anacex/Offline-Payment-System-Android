@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from log_to_supabase import log_event
+from log_to_supabase import log_event, log_event_blocking
 
 from app.core import security
 from app.core.db import get_db
@@ -119,14 +119,31 @@ If you didn't create an account, please ignore this email.
     """
     send_email(email, "Verify your Offline Pay email address", email_body, html_body)
 
-    # Log OTP generation for team visibility
-    log_event("info", "Email verification OTP generated", {
-        "user_id": user.id,
-        "email": email,
-        "otp": otp,
-        "type": "email_verification",
-        "endpoint": "/auth/signup"
-    })
+    # Log OTP generation for team visibility - CRITICAL: Must be logged
+    # Use blocking log to ensure it's written before response is sent
+    otp_logged = False
+    for attempt in range(3):  # Try up to 3 times
+        try:
+            otp_logged = log_event_blocking("info", "Email verification OTP generated", {
+                "user_id": user.id,
+                "email": email,
+                "otp": otp,
+                "type": "email_verification",
+                "endpoint": "/auth/signup",
+                "attempt": attempt + 1
+            }, timeout=2.0)
+            if otp_logged:
+                break  # Success, exit retry loop
+        except Exception as e:
+            if attempt < 2:  # Not the last attempt
+                import time
+                time.sleep(0.1)  # Small delay before retry
+            else:
+                # Last attempt failed - log to console as backup
+                print(f"[OTP LOG ERROR] Failed to log OTP to Supabase after 3 attempts: {e}")
+    
+    # Always log to console as backup (even if Supabase logging succeeded)
+    print(f"[OTP LOG] Email verification OTP for {email}: {otp} (User ID: {user.id}, Supabase: {'✓' if otp_logged else '✗'})")
 
     # For demo we return a temporary token (do not do this in production).
     return {"msg": "User created. Check your email for verification code (demo prints).", "otp_demo": otp}
@@ -227,16 +244,33 @@ If you didn't request this code, please ignore this email or contact support.
     # For demo return a temporary nonce token to validate OTP step (in prod you would save OTP.)
     nonce = secrets.token_urlsafe(16)
     
-    # Log MFA OTP generation for team visibility
-    log_event("info", "Login MFA OTP generated", {
-        "user_id": user.id,
-        "email": user.email,
-        "otp": mfa_otp,
-        "nonce": nonce,
-        "type": "login_mfa",
-        "endpoint": "/auth/login",
-        "device_fingerprint": device_fingerprint
-    })
+    # Log MFA OTP generation for team visibility - CRITICAL: Must be logged
+    # Use blocking log to ensure it's written before response is sent
+    otp_logged = False
+    for attempt in range(3):  # Try up to 3 times
+        try:
+            otp_logged = log_event_blocking("info", "Login MFA OTP generated", {
+                "user_id": user.id,
+                "email": user.email,
+                "otp": mfa_otp,
+                "nonce": nonce,
+                "type": "login_mfa",
+                "endpoint": "/auth/login",
+                "device_fingerprint": device_fingerprint,
+                "attempt": attempt + 1
+            }, timeout=2.0)
+            if otp_logged:
+                break  # Success, exit retry loop
+        except Exception as e:
+            if attempt < 2:  # Not the last attempt
+                import time
+                time.sleep(0.1)  # Small delay before retry
+            else:
+                # Last attempt failed - log to console as backup
+                print(f"[OTP LOG ERROR] Failed to log MFA OTP to Supabase after 3 attempts: {e}")
+    
+    # Always log to console as backup (even if Supabase logging succeeded)
+    print(f"[OTP LOG] Login MFA OTP for {user.email}: {mfa_otp} (User ID: {user.id}, Supabase: {'✓' if otp_logged else '✗'})")
     
     # store nonce->otp mapping temporarily in memory/cache in production
     # return nonce to client to pass back with OTP (demo)
