@@ -274,12 +274,15 @@ def log_event_blocking(level: str, message: str, meta: Dict[str, Any] = None, ti
             result = task.result(timeout=timeout)
             return result is True
         except concurrent.futures.TimeoutError:
-            # Timeout occurred
-            print(f"[LOG DEBUG] Blocking log timed out after {timeout}s")
+            # Timeout occurred - cancel the task to avoid hanging
+            task.cancel()
+            try:
+                task.result(timeout=0.1)  # Wait briefly for cancellation
+            except:
+                pass
             return False
         except Exception as e:
             # Exception occurred
-            print(f"[LOG DEBUG] Exception in blocking log: {type(e).__name__}: {e}")
             return False
     except RuntimeError:
         # No event loop running, create one
