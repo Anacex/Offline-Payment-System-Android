@@ -98,7 +98,35 @@ async def _send_via_resend(recipient: str, subject: str, body: str, html_body: O
             app_logger.info(f"Email sent via Resend to {recipient}")
             return True
         else:
-            app_logger.error(f"Resend API error: {response.status_code} - {response.text}")
+            error_text = response.text
+            app_logger.error(f"Resend API error: {response.status_code} - {error_text}")
+            
+            # Log to Supabase for monitoring
+            try:
+                import sys
+                from pathlib import Path
+                ROOT = Path(__file__).resolve().parents[2]
+                if str(ROOT) not in sys.path:
+                    sys.path.insert(0, str(ROOT))
+                from log_to_supabase import log_event
+                log_event("error", "Resend email send failed", {
+                    "recipient": recipient,
+                    "status_code": response.status_code,
+                    "error": error_text[:200],  # First 200 chars
+                    "from": EMAIL_FROM
+                })
+            except Exception:
+                pass
+            
+            # If 403 error, provide helpful message
+            if response.status_code == 403:
+                app_logger.warning(
+                    "Resend 403: Free tier only allows sending to your verified email. "
+                    "Verify a domain at resend.com/domains to send to any email."
+                )
+            
+            # Fallback to console
+            _send_via_console(recipient, subject, body)
             return False
 
 

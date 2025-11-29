@@ -37,36 +37,23 @@ async def _get_pool() -> asyncpg.pool.Pool:
     global _pool
     if _pool is None:
         # create a pool with small size suitable for lightweight logging
-        _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=4, command_timeout=10)
+        # Set max_inactive_connection_lifetime to prevent stale connections
+        _pool = await asyncpg.create_pool(
+            DATABASE_URL, 
+            min_size=1, 
+            max_size=4, 
+            command_timeout=10,
+            max_inactive_connection_lifetime=300  # Close connections after 5 min of inactivity
+        )
     return _pool
 
 async def _insert_log_async(level: str, message: str, meta: Dict[str, Any]) -> None:
-    try:
-        pool = await _get_pool()
+    """Insert log entry - handles connection errors gracefully"""
+    max_retries = 2
+    for attempt in range(max_retries):
         try:
-            async with pool.acquire() as conn:
-                # Insert row. We provide timestamp default in DB, so not setting it here.
-                await conn.execute(
-                    f"""
-                    INSERT INTO {LOG_TABLE} (level, message, meta)
-                    VALUES ($1, $2, $3)
-                    """,
-                    level, message, json.dumps(meta or {})
-                )
-        except (asyncpg.exceptions.ConnectionDoesNotExistError, 
-                asyncpg.exceptions.InterfaceError,
-                asyncpg.exceptions.PostgresConnectionError) as e:
-            # Connection pool issue - try to recreate pool
-            global _pool
-            if _pool:
-                try:
-                    await _pool.close()
-                except:
-                    pass
-                _pool = None
-            # Retry once with new pool
+            pool = await _get_pool()
             try:
-                pool = await _get_pool()
                 async with pool.acquire() as conn:
                     await conn.execute(
                         f"""
@@ -75,14 +62,39 @@ async def _insert_log_async(level: str, message: str, meta: Dict[str, Any]) -> N
                         """,
                         level, message, json.dumps(meta or {})
                     )
+                return  # Success - exit function
+            except (asyncpg.exceptions.ConnectionDoesNotExistError, 
+                    asyncpg.exceptions.InterfaceError,
+                    asyncpg.exceptions.PostgresConnectionError,
+                    asyncpg.exceptions.PoolAcquireTimeoutError) as e:
+                # Connection pool issue - reset pool and retry
+                global _pool
+                if _pool and attempt < max_retries - 1:
+                    try:
+                        await _pool.close()
+                    except:
+                        pass
+                    _pool = None
+                    # Small delay before retry
+                    await asyncio.sleep(0.1)
+                    continue
+                # If last attempt, silently fail
+                return
             except Exception:
-                pass  # Silently fail - logging shouldn't break the app
+                # Any other error - silently fail
+                return
         except Exception:
-            # Any other error - silently fail
-            pass
+            # Pool creation or other error - silently fail
+            if attempt >= max_retries - 1:
+                return
+            await asyncio.sleep(0.1)
+
+def _handle_log_task_exception(task: asyncio.Task) -> None:
+    """Handle exceptions in background logging tasks to prevent 'Future exception was never retrieved' warnings"""
+    try:
+        task.result()  # This will raise if task had an exception
     except Exception:
-        # Pool creation failed - silently fail
-        pass
+        pass  # Silently ignore - logging failures shouldn't break the app
 
 def log_event(level: str, message: str, meta: Dict[str, Any] = None) -> None:
     """
@@ -97,7 +109,9 @@ def log_event(level: str, message: str, meta: Dict[str, Any] = None) -> None:
     payload_meta = meta or {}
 
     if loop and loop.is_running():
-        asyncio.create_task(_insert_log_async(level, message, payload_meta))
+        # Create task and add exception handler to prevent "Future exception was never retrieved"
+        task = asyncio.create_task(_insert_log_async(level, message, payload_meta))
+        task.add_done_callback(_handle_log_task_exception)
     else:
         try:
             asyncio.run(_insert_log_async(level, message, payload_meta))
