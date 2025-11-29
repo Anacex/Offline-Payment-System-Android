@@ -19,6 +19,7 @@ from app.core.middleware import (
     RateLimitHeaderMiddleware
 )
 from app.core.logging_config import app_logger
+from middleware_logging import request_logging_middleware
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -37,6 +38,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimitHeaderMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
+
+# Add Supabase logging middleware
+app.middleware("http")(request_logging_middleware)
 
 # CORS Configuration
 app.add_middleware(
@@ -81,7 +85,9 @@ def startup_event():
     app_logger.info("=" * 50)
 
 @app.on_event("shutdown")
-def shutdown_event():
+async def shutdown_event():
     """Cleanup on application shutdown."""
+    from log_to_supabase import close_log_pool
+    await close_log_pool()
     app_logger.info("Shutting down Offline Payment System API")
     app_logger.info("Goodbye!")

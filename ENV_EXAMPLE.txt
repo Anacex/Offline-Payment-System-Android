@@ -8,6 +8,9 @@
 DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/offlinepay
 REQUIRE_SSL=false
 
+# Supabase Logging (optional - defaults to "server_logs" if not set)
+# SUPABASE_LOG_TABLE=server_logs
+
 # App/auth
 SECRET_KEY=replace_me_with_a_long_random_hex
 ALGORITHM=HS256
