@@ -41,22 +41,48 @@ async def _get_pool() -> asyncpg.pool.Pool:
     return _pool
 
 async def _insert_log_async(level: str, message: str, meta: Dict[str, Any]) -> None:
-    pool = await _get_pool()
     try:
-        async with pool.acquire() as conn:
-            # Insert row. We provide timestamp default in DB, so not setting it here.
-            await conn.execute(
-                f"""
-                INSERT INTO {LOG_TABLE} (level, message, meta)
-                VALUES ($1, $2, $3)
-                """,
-                level, message, json.dumps(meta or {})
-            )
-    except Exception:
+        pool = await _get_pool()
         try:
-            await asyncio.sleep(0.1)
+            async with pool.acquire() as conn:
+                # Insert row. We provide timestamp default in DB, so not setting it here.
+                await conn.execute(
+                    f"""
+                    INSERT INTO {LOG_TABLE} (level, message, meta)
+                    VALUES ($1, $2, $3)
+                    """,
+                    level, message, json.dumps(meta or {})
+                )
+        except (asyncpg.exceptions.ConnectionDoesNotExistError, 
+                asyncpg.exceptions.InterfaceError,
+                asyncpg.exceptions.PostgresConnectionError) as e:
+            # Connection pool issue - try to recreate pool
+            global _pool
+            if _pool:
+                try:
+                    await _pool.close()
+                except:
+                    pass
+                _pool = None
+            # Retry once with new pool
+            try:
+                pool = await _get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        f"""
+                        INSERT INTO {LOG_TABLE} (level, message, meta)
+                        VALUES ($1, $2, $3)
+                        """,
+                        level, message, json.dumps(meta or {})
+                    )
+            except Exception:
+                pass  # Silently fail - logging shouldn't break the app
         except Exception:
+            # Any other error - silently fail
             pass
+    except Exception:
+        # Pool creation failed - silently fail
+        pass
 
 def log_event(level: str, message: str, meta: Dict[str, Any] = None) -> None:
     """

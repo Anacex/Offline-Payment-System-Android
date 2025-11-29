@@ -17,7 +17,10 @@ async def request_logging_middleware(request: Request, call_next):
         response: Response = await call_next(request)
 
         duration_ms = int((time.time() - start) * 1000)
-        log_event("info", "Response sent", {
+        
+        # Log response - use error level for 4xx/5xx status codes
+        log_level = "error" if response.status_code >= 400 else "info"
+        log_event(log_level, "Response sent", {
             "status": response.status_code,
             "path": str(request.url.path),
             "method": request.method,

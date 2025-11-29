@@ -137,36 +137,77 @@ async def _send_via_sendgrid(recipient: str, subject: str, body: str, html_body:
 
 
 async def _send_via_smtp(recipient: str, subject: str, body: str, html_body: Optional[str] = None) -> bool:
-    """Send email via SMTP (Gmail, etc.)"""
+    """Send email via SMTP (Gmail, etc.) - async version with timeout"""
     if not SMTP_USER or not SMTP_PASSWORD:
         app_logger.warning("SMTP credentials not set, falling back to console")
         _send_via_console(recipient, subject, body)
         return False
     
     try:
+        # Run SMTP in thread pool with timeout to avoid blocking
+        import asyncio
+        loop = asyncio.get_event_loop()
+        # Use asyncio.wait_for to add timeout
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, _send_via_smtp_sync, recipient, subject, body, html_body),
+            timeout=15.0  # 15 second timeout
+        )
+        if result:
+            app_logger.info(f"Email sent via SMTP ({SMTP_HOST}) to {recipient}")
+        return result
+    except asyncio.TimeoutError:
+        error_msg = "SMTP connection timeout (15s)"
+        app_logger.error(f"SMTP error: {error_msg}")
+        _log_email_error(recipient, error_msg)
+        _send_via_console(recipient, subject, body)
+        return False
+    except Exception as e:
+        error_msg = str(e)
+        app_logger.error(f"SMTP error: {error_msg}")
+        _log_email_error(recipient, error_msg)
+        _send_via_console(recipient, subject, body)
+        return False
+
+
+def _send_via_smtp_sync(recipient: str, subject: str, body: str, html_body: Optional[str] = None) -> bool:
+    """Synchronous SMTP send (used in thread pool)"""
+    try:
         msg = MIMEMultipart("alternative")
-        # Use EMAIL_FROM if set, otherwise use SMTP_USER
         from_email = EMAIL_FROM if EMAIL_FROM and EMAIL_FROM != SMTP_USER else SMTP_USER
         msg["From"] = from_email
         msg["To"] = recipient
         msg["Subject"] = subject
-        
-        # Add both plain text and HTML versions
         msg.attach(MIMEText(body, "plain"))
         if html_body:
             msg.attach(MIMEText(html_body, "html"))
         
-        # Send via SMTP
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        # Use shorter timeout to fail fast
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.send_message(msg)
-        
-        app_logger.info(f"Email sent via SMTP ({SMTP_HOST}) to {recipient}")
         return True
-    except Exception as e:
-        app_logger.error(f"SMTP error: {str(e)}")
+    except Exception:
         return False
+
+
+def _log_email_error(recipient: str, error_msg: str) -> None:
+    """Log email errors to Supabase for monitoring"""
+    try:
+        import sys
+        from pathlib import Path
+        ROOT = Path(__file__).resolve().parents[2]
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from log_to_supabase import log_event
+        log_event("error", "Email send failed", {
+            "recipient": recipient,
+            "error": error_msg,
+            "smtp_host": SMTP_HOST,
+            "smtp_port": SMTP_PORT
+        })
+    except Exception:
+        pass  # Silently fail if logging fails
 
 
 def _send_via_console(recipient: str, subject: str, body: str) -> None:

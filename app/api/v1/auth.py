@@ -41,7 +41,14 @@ def signup(payload: dict = Body(...), db: Session = Depends(get_db)):
     if len(password) < 10 or not re.search(r"[A-Z]", password) or not re.search(r"[a-z]", password) or not re.search(r"\d", password) or not re.search(r"[^\w\s]", password):
         raise HTTPException(status_code=422, detail="Password does not meet complexity rules")
 
-    if db.query(User).filter(User.email == email).first():
+    existing_user = db.query(User).filter(User.email == email).first()
+    if existing_user:
+        # Log the duplicate email attempt
+        log_event("warning", "Signup attempt with existing email", {
+            "email": email,
+            "existing_user_id": existing_user.id,
+            "endpoint": "/auth/signup"
+        })
         raise HTTPException(status_code=400, detail="User with this email already exists")
 
     user = User(
