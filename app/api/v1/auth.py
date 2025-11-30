@@ -125,32 +125,48 @@ def verify_email(email: str = Body(...), otp: str = Body(...), db: Session = Dep
     
     return {"msg": "Email verified"}
 
-# Login step 1: credential check -> send MFA OTP
+# Login step 1: credential check -> send MFA OTP (or skip if email verified)
 @router.post("/login")
 def login_step1(email: str = Body(...), password: str = Body(...), device_fingerprint: str = Body(...), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
     if not user or not security.verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if not user.is_email_verified:
-        raise HTTPException(status_code=401, detail="Email not verified")
-
-    # generate email MFA OTP - 6 digit numeric code
-    mfa_otp_code = secrets.randbelow(1000000)  # Generate 0-999999
-    mfa_otp = f"{mfa_otp_code:06d}"  # Format as 6-digit string with leading zeros
+    # If email is verified, skip OTP and directly issue tokens
+    if user.is_email_verified:
+        access_token = security.create_access_token(subject=str(user.id), device_fingerprint=device_fingerprint)
+        refresh_token, expires_at = security.create_refresh_token(subject=str(user.id), device_fingerprint=device_fingerprint)
+        
+        # persist refresh token record
+        rt = RefreshToken(token=refresh_token, user_id=user.id, device_fingerprint=device_fingerprint, expires_at=expires_at)
+        db.add(rt)
+        db.commit()
+        
+        # Return tokens directly for verified users (skip OTP step)
+        return {
+            "requires_otp": False,
+            "access_token": access_token,
+            "token_type": "bearer",
+            "refresh_token": refresh_token
+        }
+    
+    # Email not verified - require OTP verification
+    # Generate email verification OTP - 6 digit numeric code
+    otp_code = secrets.randbelow(1000000)  # Generate 0-999999
+    otp = f"{otp_code:06d}"  # Format as 6-digit string with leading zeros
     # In production save OTP in DB/Redis with expiry; here we print/send for demo
     
-    # Send login OTP email with formatted template
+    # Send verification email with formatted template
     email_body = f"""
 Hello {user.name},
 
-You requested a login code. Use the code below to complete your login:
+You need to verify your email to complete login. Please use the code below:
 
-Your login code: {mfa_otp}
+Your verification code: {otp}
 
 This code will expire in 10 minutes.
 
-If you didn't request this code, please ignore this email or contact support.
+If you didn't request this code, please ignore this email.
 """
     
     # HTML version for better formatting
@@ -162,28 +178,25 @@ If you didn't request this code, please ignore this email or contact support.
         <style>
             body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
             .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-            .header {{ background-color: #2196F3; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .header {{ background-color: #FF9800; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
             .content {{ background-color: #f9f9f9; padding: 30px; border-radius: 0 0 5px 5px; }}
-            .otp-code {{ font-size: 32px; font-weight: bold; color: #2196F3; text-align: center; 
+            .otp-code {{ font-size: 32px; font-weight: bold; color: #FF9800; text-align: center; 
                         background-color: white; padding: 20px; margin: 20px 0; 
                         border-radius: 5px; letter-spacing: 5px; }}
             .footer {{ text-align: center; margin-top: 20px; color: #666; font-size: 12px; }}
-            .warning {{ background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin: 15px 0; }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="header">
-                <h1>Login Verification Code</h1>
+                <h1>Email Verification Required</h1>
             </div>
             <div class="content">
                 <p>Hello <strong>{user.name}</strong>,</p>
-                <p>You requested a login code. Use the code below to complete your login:</p>
-                <div class="otp-code">{mfa_otp}</div>
+                <p>You need to verify your email to complete login. Please use the code below:</p>
+                <div class="otp-code">{otp}</div>
                 <p>This code will expire in <strong>10 minutes</strong>.</p>
-                <div class="warning">
-                    <p><strong>⚠️ Security Notice:</strong> If you didn't request this code, please ignore this email or contact support immediately.</p>
-                </div>
+                <p>If you didn't request this code, please ignore this email.</p>
             </div>
             <div class="footer">
                 <p>Offline Payment System</p>
@@ -192,19 +205,23 @@ If you didn't request this code, please ignore this email or contact support.
     </body>
     </html>
     """
-    send_email(user.email, "Your login verification code", email_body, html_body)
+    send_email(user.email, "Verify your email to complete login", email_body, html_body)
 
     # For demo return a temporary nonce token to validate OTP step (in prod you would save OTP.)
     nonce = secrets.token_urlsafe(16)
     
     # Always log to console as backup
-    print(f"[OTP LOG] Login MFA OTP for {user.email}: {mfa_otp} (User ID: {user.id})")
+    print(f"[OTP LOG] Email verification OTP for login {user.email}: {otp} (User ID: {user.id})")
     
-    # store nonce->otp mapping temporarily in memory/cache in production
-    # return nonce to client to pass back with OTP (demo)
-    return {"nonce_demo": nonce, "otp_demo": mfa_otp}
+    # Return OTP requirement for unverified users
+    return {
+        "requires_otp": True,
+        "nonce_demo": nonce,
+        "otp_demo": otp,
+        "email_verified": False
+    }
 
-# Login step 2: verify OTP -> issue access & refresh token
+# Login step 2: verify OTP -> issue access & refresh token (and verify email if unverified)
 @router.post("/login/confirm")
 def login_confirm(email: str = Body(...), otp: str = Body(...), nonce: str = Body(...), device_fingerprint: str = Body(...), db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == email).first()
@@ -213,6 +230,13 @@ def login_confirm(email: str = Body(...), otp: str = Body(...), nonce: str = Bod
 
     # In production verify OTP via DB/Redis store keyed to nonce.
     # Here assume otp valid for demo.
+    
+    # If email is not verified, verify it now after OTP confirmation
+    if not user.is_email_verified:
+        user.is_email_verified = True
+        db.add(user)
+        db.commit()
+
     access_token = security.create_access_token(subject=str(user.id), device_fingerprint=device_fingerprint)
     refresh_token, expires_at = security.create_refresh_token(subject=str(user.id), device_fingerprint=device_fingerprint)
 
@@ -248,7 +272,10 @@ def token_refresh(refresh_token: str = Body(...), device_fingerprint: str = Body
 def get_current_user_info(user: User = Depends(get_current_user)):
     """Returns current authenticated user's information including email verification status"""
     return {
+        "id": user.id,
         "email": user.email,
+        "name": user.name,
+        "phone": user.phone,
         "emailVerified": user.is_email_verified
     }
 
