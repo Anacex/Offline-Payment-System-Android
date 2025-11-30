@@ -6,6 +6,7 @@ import secrets
 
 from app.core import security
 from app.core.db import get_db
+from app.core.deps import get_current_user
 from app.models import User
 from app.models_refresh_token import RefreshToken
 
@@ -241,6 +242,15 @@ def token_refresh(refresh_token: str = Body(...), device_fingerprint: str = Body
     # issue new access token
     access_token = security.create_access_token(subject=str(rt_record.user_id), device_fingerprint=device_fingerprint)
     return {"access_token": access_token, "token_type": "bearer"}
+
+# Get current user info
+@router.get("/me")
+def get_current_user_info(user: User = Depends(get_current_user)):
+    """Returns current authenticated user's information including email verification status"""
+    return {
+        "email": user.email,
+        "emailVerified": user.is_email_verified
+    }
 
 # Logout (revoke refresh token)
 @router.post("/logout")
