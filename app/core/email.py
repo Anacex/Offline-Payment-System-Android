@@ -111,22 +111,6 @@ async def _send_via_resend(recipient: str, subject: str, body: str, html_body: O
             error_text = response.text
             app_logger.error(f"Resend API error: {response.status_code} - {error_text}")
             
-            # Log to Supabase for monitoring
-            try:
-                import sys
-                from pathlib import Path
-                ROOT = Path(__file__).resolve().parents[2]
-                if str(ROOT) not in sys.path:
-                    sys.path.insert(0, str(ROOT))
-                from log_to_supabase import log_event
-                log_event("error", "Resend email send failed", {
-                    "recipient": recipient,
-                    "status_code": response.status_code,
-                    "error": error_text[:200],  # First 200 chars
-                    "from": EMAIL_FROM
-                })
-            except Exception:
-                pass
             
             # If 403 error, provide helpful message
             if response.status_code == 403:
@@ -196,13 +180,11 @@ async def _send_via_smtp(recipient: str, subject: str, body: str, html_body: Opt
     except asyncio.TimeoutError:
         error_msg = "SMTP connection timeout (15s)"
         app_logger.error(f"SMTP error: {error_msg}")
-        _log_email_error(recipient, error_msg)
         _send_via_console(recipient, subject, body)
         return False
     except Exception as e:
         error_msg = str(e)
         app_logger.error(f"SMTP error: {error_msg}")
-        _log_email_error(recipient, error_msg)
         _send_via_console(recipient, subject, body)
         return False
 
@@ -229,23 +211,6 @@ def _send_via_smtp_sync(recipient: str, subject: str, body: str, html_body: Opti
         return False
 
 
-def _log_email_error(recipient: str, error_msg: str) -> None:
-    """Log email errors to Supabase for monitoring"""
-    try:
-        import sys
-        from pathlib import Path
-        ROOT = Path(__file__).resolve().parents[2]
-        if str(ROOT) not in sys.path:
-            sys.path.insert(0, str(ROOT))
-        from log_to_supabase import log_event
-        log_event("error", "Email send failed", {
-            "recipient": recipient,
-            "error": error_msg,
-            "smtp_host": SMTP_HOST,
-            "smtp_port": SMTP_PORT
-        })
-    except Exception:
-        pass  # Silently fail if logging fails
 
 
 def _send_via_console(recipient: str, subject: str, body: str) -> None:

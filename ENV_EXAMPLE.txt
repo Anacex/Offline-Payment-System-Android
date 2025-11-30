@@ -8,9 +8,6 @@
 DATABASE_URL=postgresql+psycopg2://postgres:postgres@localhost:5432/offlinepay
 REQUIRE_SSL=false
 
-# Supabase Logging (optional - defaults to "server_logs" if not set)
-# SUPABASE_LOG_TABLE=server_logs
-
 # Email Configuration - Gmail SMTP (Recommended for shared project email)
 # See GMAIL_SETUP.md for detailed setup instructions
 EMAIL_PROVIDER=smtp

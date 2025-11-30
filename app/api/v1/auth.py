@@ -3,15 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException, status, Body, Request
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import secrets
-import sys
-from pathlib import Path
-
-# Add project root to path for logging import
-ROOT = Path(__file__).resolve().parents[3]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-from log_to_supabase import log_event, log_event_blocking
 
 from app.core import security
 from app.core.db import get_db
@@ -43,12 +34,6 @@ def signup(payload: dict = Body(...), db: Session = Depends(get_db)):
 
     existing_user = db.query(User).filter(User.email == email).first()
     if existing_user:
-        # Log the duplicate email attempt
-        log_event("warning", "Signup attempt with existing email", {
-            "email": email,
-            "existing_user_id": existing_user.id,
-            "endpoint": "/auth/signup"
-        })
         raise HTTPException(status_code=400, detail="User with this email already exists")
 
     user = User(
@@ -119,16 +104,6 @@ If you didn't create an account, please ignore this email.
     """
     send_email(email, "Verify your Offline Pay email address", email_body, html_body)
 
-    # Log OTP generation for team visibility - Use fire-and-forget to avoid delays
-    # The OTP will be logged asynchronously, ensuring fast response times
-    log_event("info", "Email verification OTP generated", {
-        "user_id": user.id,
-        "email": email,
-        "otp": otp,
-        "type": "email_verification",
-        "endpoint": "/auth/signup"
-    })
-    
     # Always log to console as backup
     print(f"[OTP LOG] Email verification OTP for {email}: {otp} (User ID: {user.id})")
 
@@ -146,16 +121,6 @@ def verify_email(email: str = Body(...), otp: str = Body(...), db: Session = Dep
     user.is_email_verified = True
     db.add(user)
     db.commit()
-    
-    # Log OTP verification
-    log_event("info", "Email verification OTP verified", {
-        "user_id": user.id,
-        "email": email,
-        "otp": otp,
-        "type": "email_verification",
-        "endpoint": "/auth/verify-email",
-        "status": "verified"
-    })
     
     return {"msg": "Email verified"}
 
@@ -231,18 +196,6 @@ If you didn't request this code, please ignore this email or contact support.
     # For demo return a temporary nonce token to validate OTP step (in prod you would save OTP.)
     nonce = secrets.token_urlsafe(16)
     
-    # Log MFA OTP generation for team visibility - Use fire-and-forget to avoid delays
-    # The OTP will be logged asynchronously, ensuring fast response times
-    log_event("info", "Login MFA OTP generated", {
-        "user_id": user.id,
-        "email": user.email,
-        "otp": mfa_otp,
-        "nonce": nonce,
-        "type": "login_mfa",
-        "endpoint": "/auth/login",
-        "device_fingerprint": device_fingerprint
-    })
-    
     # Always log to console as backup
     print(f"[OTP LOG] Login MFA OTP for {user.email}: {mfa_otp} (User ID: {user.id})")
     
@@ -266,18 +219,6 @@ def login_confirm(email: str = Body(...), otp: str = Body(...), nonce: str = Bod
     rt = RefreshToken(token=refresh_token, user_id=user.id, device_fingerprint=device_fingerprint, expires_at=expires_at)
     db.add(rt)
     db.commit()
-
-    # Log OTP verification and successful login
-    log_event("info", "Login MFA OTP verified - login successful", {
-        "user_id": user.id,
-        "email": email,
-        "otp": otp,
-        "nonce": nonce,
-        "type": "login_mfa",
-        "endpoint": "/auth/login/confirm",
-        "status": "verified",
-        "device_fingerprint": device_fingerprint
-    })
 
     return {"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token}
 

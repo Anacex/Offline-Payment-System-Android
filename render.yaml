@@ -1,20 +1,65 @@
 services:
   - type: web
     name: offline-payment-system
-    env: docker
+    runtime: python
     plan: free
-    dockerfilePath: Dockerfile
-    autoDeploy: true
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    autoDeployTrigger: commit
     envVars:
+      # All environment variables with values - automatically set on deployment
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "15"
+      - key: ALGORITHM
+        value: "HS256"
+      - key: APP_NAME
+        value: "Offline Payment System"
+      - key: APP_VERSION
+        value: "1.0.0"
+      - key: CORS_ORIGINS
+        value: "http://localhost:3000,http://localhost:8080"
       - key: DATABASE_URL
-        sync: false
-      - key: SECRET_KEY
-        sync: false
+        value: "postgresql://postgres.[project-ref]:[password]@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
       - key: DEBUG
         value: "false"
+      - key: EMAIL_FROM
+        value: "fypofflinepay@gmail.com"
+      - key: EMAIL_OTP_EXPIRE_MINUTES
+        value: "10"
+      - key: EMAIL_PROVIDER
+        value: "sendgrid"
+      - key: ENABLE_ANALYTICS
+        value: "false"
+      - key: ENABLE_DEVICE_FINGERPRINTING
+        value: "true"
+      - key: ENABLE_MFA
+        value: "true"
+      - key: FORCE_UPDATE_ENABLED
+        value: "false"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: MOBILE_APP_VERSION_MIN
+        value: "1.0.0"
+      - key: PASSWORD_MIN_LENGTH
+        value: "10"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "30"
+      - key: REDIS_ENABLED
+        value: "false"
+      - key: REDIS_URL
+        value: "redis://localhost:6379/0"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "30"
       - key: REQUIRE_SSL
         value: "true"
-      - key: CORS_ORIGINS
-        sync: false
+      - key: SECRET_KEY
+        value: "[your-secret-key-here]"
+      - key: SENDGRID_API_KEY
+        value: "[your-sendgrid-api-key-here]"
+      - key: SENTRY_DSN
+        value: ""
 
 
