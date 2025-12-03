@@ -109,3 +109,28 @@ class ReceiptVerification(BaseModel):
     receipt_data: dict
     signature: str
     sender_public_key: str
+
+
+class TopUpRequest(BaseModel):
+    """Schema for requesting wallet top-up."""
+    wallet_id: int
+    amount: condecimal(max_digits=12, decimal_places=2) = Field(..., gt=0)
+    password: str
+
+
+class TopUpResponse(BaseModel):
+    """Schema for top-up request response."""
+    msg: str
+    otp_demo: Optional[str] = None  # For development/testing
+
+
+class TopUpVerifyRequest(BaseModel):
+    """Schema for verifying top-up OTP."""
+    wallet_id: int
+    otp: str
+
+
+class TopUpVerifyResponse(BaseModel):
+    """Schema for top-up verification response."""
+    msg: str
+    wallet: WalletRead

@@ -113,6 +113,8 @@ If this looks good I will delete the old archived docs to remove clutter (you as
 - `GET /api/v1/wallets/transfers/history` - Transfer history
 - `POST /api/v1/wallets/qr-code` - Generate QR code
 - `GET /api/v1/wallets/{id}/private-key` - Get private key
+- `POST /api/v1/wallets/topup` - Request wallet top-up (sends OTP email)
+- `POST /api/v1/wallets/topup/verify` - Verify top-up OTP and update balance
 
 **Offline Transactions**:
 - `POST /api/v1/offline-transactions/create-local` - Create transaction

@@ -20,7 +20,6 @@ services:
       - key: CORS_ORIGINS
         value: "http://localhost:3000,http://localhost:8080"
       - key: DATABASE_URL
-        value: "postgresql://postgres.[project-ref]:[password]@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
       - key: DEBUG
         value: "false"
       - key: EMAIL_FROM
@@ -56,9 +55,7 @@ services:
       - key: REQUIRE_SSL
         value: "true"
       - key: SECRET_KEY
-        value: "[your-secret-key-here]"
       - key: SENDGRID_API_KEY
-        value: "[your-sendgrid-api-key-here]"
       - key: SENTRY_DSN
         value: ""
 
