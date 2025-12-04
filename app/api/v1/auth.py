@@ -274,18 +274,14 @@ def get_current_user_info(user: User = Depends(get_current_user), db: Session = 
     from app.models.wallet import Wallet
     from decimal import Decimal
     
-    # Get user's wallets to calculate total balance
-    wallets = db.query(Wallet).filter(
+    # Get user's wallet (only one wallet per user)
+    wallet = db.query(Wallet).filter(
         Wallet.user_id == user.id,
         Wallet.is_active == True
-    ).all()
+    ).first()
     
-    # Calculate total balance from all active wallets
-    total_balance = sum(Decimal(str(w.balance)) for w in wallets)
-    
-    # Get offline wallet balance specifically (for profile display)
-    offline_wallet = next((w for w in wallets if w.wallet_type == "offline"), None)
-    offline_balance = Decimal(str(offline_wallet.balance)) if offline_wallet else Decimal("0.00")
+    # Get wallet balance (user has only one wallet)
+    wallet_balance = Decimal(str(wallet.balance)) if wallet else Decimal("0.00")
     
     return {
         "id": user.id,
