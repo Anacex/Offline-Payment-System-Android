@@ -4,6 +4,7 @@ Handles wallet creation, balance management, and transfers.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import Request
 from sqlalchemy.orm import Session
 from typing import List
 import secrets
