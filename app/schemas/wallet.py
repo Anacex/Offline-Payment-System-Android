@@ -10,7 +10,7 @@ class WalletBase(BaseModel):
 
 class WalletCreate(WalletBase):
     """Schema for creating a new wallet."""
-    pass
+    bank_account_number: str  # Bank account number (required, for demo)
 
 
 class WalletRead(WalletBase):
@@ -19,6 +19,7 @@ class WalletRead(WalletBase):
     user_id: int
     balance: condecimal(max_digits=12, decimal_places=2)
     public_key: Optional[str] = None  # Only for offline wallets
+    bank_account_number: str  # Bank account number (required)
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -116,6 +117,7 @@ class TopUpRequest(BaseModel):
     wallet_id: int
     amount: condecimal(max_digits=12, decimal_places=2) = Field(..., gt=0)
     password: str
+    bank_account_number: str  # Bank account number (no validation for demo)
 
 
 class TopUpResponse(BaseModel):
@@ -134,3 +136,24 @@ class TopUpVerifyResponse(BaseModel):
     """Schema for top-up verification response."""
     msg: str
     wallet: WalletRead
+
+
+class WalletCreateRequest(BaseModel):
+    """Schema for initiating wallet creation (sends OTP)."""
+    wallet_type: Literal["current", "offline"]
+    currency: Literal["PKR", "USD", "AED", "SAR"] = "PKR"
+    bank_account_number: str  # Bank account number (no validation for demo)
+
+
+class WalletCreateResponse(BaseModel):
+    """Schema for wallet creation request response."""
+    msg: str
+    otp_demo: Optional[str] = None  # For development/testing
+
+
+class WalletCreateVerifyRequest(BaseModel):
+    """Schema for verifying wallet creation OTP."""
+    wallet_type: Literal["current", "offline"]
+    currency: Literal["PKR", "USD", "AED", "SAR"] = "PKR"
+    bank_account_number: str
+    otp: str

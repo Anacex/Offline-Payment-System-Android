@@ -20,6 +20,9 @@ class Wallet(Base):
     public_key = Column(Text, nullable=True)  # RSA public key (PEM format)
     private_key_encrypted = Column(Text, nullable=True)  # Encrypted RSA private key
     
+    # Bank account information (for demo purposes)
+    bank_account_number = Column(String(64), nullable=False)  # User's bank account number (required)
+    
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

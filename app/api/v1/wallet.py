@@ -18,7 +18,8 @@ from app.models.wallet import Wallet, WalletTransfer
 from app.schemas.wallet import (
     WalletCreate, WalletRead, WalletTransferCreate, 
     WalletTransferRead, QRCodeRequest, QRCodeResponse,
-    TopUpRequest, TopUpResponse, TopUpVerifyRequest, TopUpVerifyResponse
+    TopUpRequest, TopUpResponse, TopUpVerifyRequest, TopUpVerifyResponse,
+    WalletCreateRequest, WalletCreateResponse, WalletCreateVerifyRequest
 )
 from app.core import security
 from app.core.email import send_email
@@ -26,6 +27,206 @@ from app.core.email import send_email
 router = APIRouter(prefix="/api/v1/wallets", tags=["wallets"], dependencies=[Depends(get_current_user)])
 
 
+@router.post("/create-request", response_model=WalletCreateResponse, status_code=status.HTTP_200_OK)
+def initiate_wallet_creation(
+    payload: WalletCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Initiate wallet creation by sending OTP to user's email.
+    User must verify OTP before wallet is actually created.
+    Each user can have only one wallet.
+    """
+    # Check if user already has a wallet (only one wallet per user)
+    existing_wallet = db.query(Wallet).filter(
+        Wallet.user_id == current_user.id,
+        Wallet.is_active == True
+    ).first()
+    
+    if existing_wallet:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User already has a wallet. Each user can have only one wallet."
+        )
+    
+    # Generate OTP (reuse same logic as signup)
+    otp_code = secrets.randbelow(1000000)  # Generate 0-999999
+    otp = f"{otp_code:06d}"  # Format as 6-digit string with leading zeros
+    
+    # Store OTP with wallet creation data
+    otp_key = f"wallet_create_{current_user.id}_{payload.wallet_type}"
+    _wallet_create_otp_store[otp_key] = (
+        otp, 
+        datetime.utcnow(), 
+        payload.wallet_type, 
+        payload.currency, 
+        payload.bank_account_number
+    )
+    
+    # Send email with OTP
+    email_body = f"""
+Hello {current_user.name},
+
+You have initiated the creation of a {payload.wallet_type} wallet.
+
+Bank Account Number: {payload.bank_account_number}
+Wallet Type: {payload.wallet_type}
+Currency: {payload.currency}
+
+Please use the verification code below to complete wallet creation:
+
+Your verification code: {otp}
+
+This code will expire in 10 minutes.
+
+If you didn't initiate this wallet creation, please ignore this email or contact support immediately.
+"""
+    
+    # HTML version for better formatting
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #059669; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #f9f9f9; padding: 30px; border-radius: 0 0 5px 5px; }}
+            .otp-code {{ font-size: 32px; font-weight: bold; color: #059669; text-align: center; 
+                        background-color: white; padding: 20px; margin: 20px 0; 
+                        border-radius: 5px; letter-spacing: 5px; }}
+            .info-box {{ background-color: white; padding: 15px; margin: 20px 0; border-radius: 5px; border-left: 4px solid #059669; }}
+            .footer {{ text-align: center; margin-top: 20px; color: #666; font-size: 12px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Wallet Creation Verification</h1>
+            </div>
+            <div class="content">
+                <p>Hello <strong>{current_user.name}</strong>,</p>
+                <p>You have initiated the creation of a <strong>{payload.wallet_type}</strong> wallet.</p>
+                
+                <div class="info-box">
+                    <p><strong>Bank Account Number:</strong> {payload.bank_account_number}</p>
+                    <p><strong>Wallet Type:</strong> {payload.wallet_type}</p>
+                    <p><strong>Currency:</strong> {payload.currency}</p>
+                </div>
+                
+                <p>Please use the verification code below to complete wallet creation:</p>
+                <div class="otp-code">{otp}</div>
+                <p>This code will expire in <strong>10 minutes</strong>.</p>
+                <p>If you didn't initiate this wallet creation, please ignore this email or contact support immediately.</p>
+            </div>
+            <div class="footer">
+                <p>Offline Payment System</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    send_email(current_user.email, "Verify your wallet creation", email_body, html_body)
+    
+    # Always log to console as backup
+    print(f"[OTP LOG] Wallet creation OTP for {payload.wallet_type} wallet (User: {current_user.email}): {otp}")
+    
+    return WalletCreateResponse(
+        msg="Wallet creation initiated. Check your email for verification code.",
+        otp_demo=otp  # For development/testing
+    )
+
+
+@router.post("/create-verify", response_model=WalletRead, status_code=status.HTTP_201_CREATED)
+def verify_and_create_wallet(
+    payload: WalletCreateVerifyRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Verify OTP and create wallet with bank account number.
+    Each user can have only one wallet.
+    """
+    # Check if user already has a wallet (only one wallet per user)
+    existing_wallet = db.query(Wallet).filter(
+        Wallet.user_id == current_user.id,
+        Wallet.is_active == True
+    ).first()
+    
+    if existing_wallet:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User already has a wallet. Each user can have only one wallet."
+        )
+    
+    # Verify OTP
+    otp_key = f"wallet_create_{current_user.id}_{payload.wallet_type}"
+    stored_otp_data = _wallet_create_otp_store.get(otp_key)
+    
+    if not stored_otp_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OTP not found or expired. Please initiate wallet creation again."
+        )
+    
+    stored_otp, otp_timestamp, wallet_type, currency, bank_account_number = stored_otp_data
+    
+    # Check OTP expiration (10 minutes)
+    otp_age = datetime.utcnow() - otp_timestamp
+    if otp_age.total_seconds() > 600:  # 10 minutes
+        _wallet_create_otp_store.pop(otp_key, None)  # Remove expired OTP
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OTP expired. Please initiate wallet creation again."
+        )
+    
+    # Verify OTP matches
+    if stored_otp != payload.otp:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid OTP"
+        )
+    
+    # Verify wallet type and currency match
+    if wallet_type != payload.wallet_type or currency != payload.currency:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Wallet type or currency mismatch"
+        )
+    
+    # Verify bank account number matches
+    if bank_account_number != payload.bank_account_number:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bank account number mismatch"
+        )
+    
+    # Create wallet (always offline type with cryptographic keys)
+    public_key, private_key = CryptoManager.generate_key_pair()
+    wallet = Wallet(
+        user_id=current_user.id,
+        wallet_type="offline",  # All wallets are offline type
+        currency=payload.currency,
+        balance=0,
+        bank_account_number=payload.bank_account_number,
+        public_key=public_key,
+        private_key_encrypted=private_key  # TODO: Encrypt properly in production
+    )
+    
+    db.add(wallet)
+    db.commit()
+    db.refresh(wallet)
+    
+    # Remove used OTP
+    _wallet_create_otp_store.pop(otp_key, None)
+    
+    return wallet
+
+
+# Keep old endpoint for backward compatibility (deprecated)
 @router.post("/", response_model=WalletRead, status_code=status.HTTP_201_CREATED)
 def create_wallet(
     payload: WalletCreate,
@@ -33,37 +234,33 @@ def create_wallet(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new wallet (current or offline) for the authenticated user.
-    For offline wallets, generates RSA key pair automatically.
+    Create a new wallet for the authenticated user.
+    DEPRECATED: Use /create-request and /create-verify endpoints instead.
+    Each user can have only one wallet. All wallets are offline type with cryptographic keys.
     """
-    # Check if user already has a wallet of this type
+    # Check if user already has a wallet (only one wallet per user)
     existing_wallet = db.query(Wallet).filter(
         Wallet.user_id == current_user.id,
-        Wallet.wallet_type == payload.wallet_type,
         Wallet.is_active == True
     ).first()
     
     if existing_wallet:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"User already has an active {payload.wallet_type} wallet"
+            detail="User already has a wallet. Each user can have only one wallet."
         )
     
-    # Create wallet
+    # Create wallet (always offline type with cryptographic keys)
+    public_key, private_key = CryptoManager.generate_key_pair()
     wallet = Wallet(
         user_id=current_user.id,
-        wallet_type=payload.wallet_type,
+        wallet_type="offline",  # All wallets are offline type
         currency=payload.currency,
-        balance=0
+        balance=0,
+        bank_account_number=payload.bank_account_number if hasattr(payload, 'bank_account_number') and payload.bank_account_number else "N/A",
+        public_key=public_key,
+        private_key_encrypted=private_key  # TODO: Encrypt properly in production
     )
-    
-    # Generate keys for offline wallet
-    if payload.wallet_type == "offline":
-        public_key, private_key = CryptoManager.generate_key_pair()
-        wallet.public_key = public_key
-        # In production, encrypt private key with user's password/PIN
-        # For now, we'll encrypt with a placeholder (user should store securely on device)
-        wallet.private_key_encrypted = private_key  # TODO: Encrypt properly
     
     db.add(wallet)
     db.commit()
@@ -293,8 +490,12 @@ def get_wallet_private_key(
 
 
 # In-memory OTP storage (for demo - use Redis/DB in production)
-# Key: f"topup_{wallet_id}_{user_id}", Value: (otp, timestamp, amount)
-_topup_otp_store: dict[str, tuple[str, datetime, Decimal]] = {}
+# Key: f"topup_{wallet_id}_{user_id}", Value: (otp, timestamp, amount, bank_account_number)
+_topup_otp_store: dict[str, tuple[str, datetime, Decimal, str]] = {}
+
+# In-memory OTP storage for wallet creation
+# Key: f"wallet_create_{user_id}_{wallet_type}", Value: (otp, timestamp, wallet_type, currency, bank_account_number)
+_wallet_create_otp_store: dict[str, tuple[str, datetime, str, str, str]] = {}
 
 
 @router.post("/topup", response_model=TopUpResponse, status_code=status.HTTP_200_OK)
@@ -341,9 +542,9 @@ def request_topup(
     otp_code = secrets.randbelow(1000000)  # Generate 0-999999
     otp = f"{otp_code:06d}"  # Format as 6-digit string with leading zeros
     
-    # Store OTP with amount (keyed by wallet_id and user_id for verification)
+    # Store OTP with amount and bank account number (keyed by wallet_id and user_id for verification)
     otp_key = f"topup_{payload.wallet_id}_{current_user.id}"
-    _topup_otp_store[otp_key] = (otp, datetime.utcnow(), payload.amount)
+    _topup_otp_store[otp_key] = (otp, datetime.utcnow(), payload.amount, payload.bank_account_number)
     
     # Send email with OTP (reuse same email service as signup)
     email_body = f"""
@@ -352,6 +553,7 @@ Hello {current_user.name},
 You have requested to top up your {wallet.wallet_type} wallet.
 
 Top-up amount: {payload.amount} {wallet.currency}
+Bank Account Number: {payload.bank_account_number}
 Wallet ID: {wallet.id}
 
 Please use the verification code below to complete your top-up:
@@ -392,6 +594,7 @@ If you didn't request this top-up, please ignore this email or contact support i
                 
                 <div class="info-box">
                     <p><strong>Top-up Amount:</strong> {payload.amount} {wallet.currency}</p>
+                    <p><strong>Bank Account Number:</strong> {payload.bank_account_number}</p>
                     <p><strong>Wallet ID:</strong> {wallet.id}</p>
                     <p><strong>Current Balance:</strong> {wallet.balance} {wallet.currency}</p>
                     <p><strong>New Balance:</strong> {new_balance} {wallet.currency}</p>
@@ -453,7 +656,7 @@ def verify_topup(
             detail="OTP not found or expired. Please request a new top-up."
         )
     
-    stored_otp, otp_timestamp, topup_amount = stored_otp_data
+    stored_otp, otp_timestamp, topup_amount, bank_account_number = stored_otp_data
     
     # Check OTP expiration (10 minutes)
     otp_age = datetime.utcnow() - otp_timestamp

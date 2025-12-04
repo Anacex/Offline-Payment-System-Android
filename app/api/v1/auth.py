@@ -269,14 +269,32 @@ def token_refresh(refresh_token: str = Body(...), device_fingerprint: str = Body
 
 # Get current user info
 @router.get("/me")
-def get_current_user_info(user: User = Depends(get_current_user)):
-    """Returns current authenticated user's information including email verification status"""
+def get_current_user_info(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Returns current authenticated user's information including email verification status and wallet balance"""
+    from app.models.wallet import Wallet
+    from decimal import Decimal
+    
+    # Get user's wallets to calculate total balance
+    wallets = db.query(Wallet).filter(
+        Wallet.user_id == user.id,
+        Wallet.is_active == True
+    ).all()
+    
+    # Calculate total balance from all active wallets
+    total_balance = sum(Decimal(str(w.balance)) for w in wallets)
+    
+    # Get offline wallet balance specifically (for profile display)
+    offline_wallet = next((w for w in wallets if w.wallet_type == "offline"), None)
+    offline_balance = Decimal(str(offline_wallet.balance)) if offline_wallet else Decimal("0.00")
+    
     return {
         "id": user.id,
         "email": user.email,
         "name": user.name,
         "phone": user.phone,
-        "emailVerified": user.is_email_verified
+        "emailVerified": user.is_email_verified,
+        "totalBalance": float(wallet_balance),
+        "offlineBalance": float(wallet_balance)  # Same as total since user has only one wallet
     }
 
 # Logout (revoke refresh token)
