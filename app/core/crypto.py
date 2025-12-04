@@ -154,9 +154,31 @@ class CryptoManager:
         return hashlib.sha256(canonical_json.encode('utf-8')).hexdigest()
     
     @staticmethod
+    def create_payee_qr_payload(payee_id: str, payee_name: str, device_id: str) -> Dict[str, Any]:
+        """
+        Create Payee QR payload (Step 1 - new MVP format).
+        Format: { payeeId, payeeName, deviceId, nonce }
+        
+        Args:
+            payee_id: Payee's unique identifier (e.g., user ID as string)
+            payee_name: Payee's display name
+            device_id: Device identifier (e.g., device fingerprint)
+            
+        Returns:
+            Dictionary containing Payee QR payload
+        """
+        return {
+            "payeeId": payee_id,
+            "payeeName": payee_name,
+            "deviceId": device_id,
+            "nonce": CryptoManager.generate_nonce()[:16]  # Short nonce for QR
+        }
+    
+    @staticmethod
     def create_qr_payload(public_key: str, user_id: int, wallet_id: int, timestamp: str = None) -> Dict[str, Any]:
         """
-        Create QR code payload for receiving offline payments.
+        Create QR code payload for receiving offline payments (legacy format).
+        DEPRECATED: Use create_payee_qr_payload instead for new MVP flow.
         
         Args:
             public_key: Receiver's public key

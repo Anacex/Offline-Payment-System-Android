@@ -17,6 +17,8 @@ This is the canonical entry point for new contributors. It links to focused docu
 - Project index & additional docs: DOCUMENTATION_INDEX.md
 - Threat model & security: THREAT_MODEL.md
 - Mobile integration guide: MOBILE_APP_GUIDE.md
+- **Offline transaction workflow: [OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md)** ← Complete transaction flow documentation
+- **QR payload analysis: [QR_PAYLOAD_ANALYSIS.md](QR_PAYLOAD_ANALYSIS.md)** ← QR code field analysis & recommendations
 
 ## Recommended first steps for a new developer
 1. Read [START_HERE.md](START_HERE.md) (5 min) — comprehensive documentation roadmap.
@@ -317,6 +319,8 @@ uvicorn app.main:app --reload --port 8001
 For questions or issues:
 - **Documentation**: See API_DOCUMENTATION.md
 - **Security**: See THREAT_MODEL.md
+- **Offline Transactions**: See OFFLINE_TRANSACTION_WORKFLOW.md
+- **QR Code Implementation**: See QR_PAYLOAD_ANALYSIS.md
 - **Issues**: Create GitHub issue
 
 ## 📄 License

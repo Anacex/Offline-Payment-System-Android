@@ -9,7 +9,9 @@ Welcome! This document is your **roadmap to understanding the entire project**. 
 ### I'm a Frontend/Mobile Developer
 1. Start: `README.md` (5 min) — overview & local setup
 2. Read: `MOBILE_APP_GUIDE.md` (15 min) — mobile integration guide
-3. Reference: `API_DOCUMENTATION.md` (ongoing) — API endpoints & responses
+3. Read: `OFFLINE_TRANSACTION_WORKFLOW.md` (30 min) — complete transaction flow documentation
+4. Read: `QR_PAYLOAD_ANALYSIS.md` (15 min) — QR code field analysis & recommendations
+5. Reference: `API_DOCUMENTATION.md` (ongoing) — API endpoints & responses
 
 ### I'm a Backend Developer
 1. Start: `README.md` (5 min) — overview & project structure
@@ -69,6 +71,8 @@ Welcome! This document is your **roadmap to understanding the entire project**. 
 | Document | Purpose | Audience | Time |
 |----------|---------|----------|------|
 | **[MOBILE_APP_GUIDE.md](MOBILE_APP_GUIDE.md)** | How to integrate mobile app with backend; JWT token handling; endpoints for mobile | Mobile/Frontend | 15 min |
+| **[OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md)** | Complete offline transaction workflow documentation; 5-step process; technical implementation details | Mobile/Frontend/Backend | 30 min |
+| **[QR_PAYLOAD_ANALYSIS.md](QR_PAYLOAD_ANALYSIS.md)** | QR code payload field analysis; current MVP fields; recommended production enhancements; security considerations | Mobile/Frontend/Backend | 15 min |
 
 ---
 
@@ -126,15 +130,17 @@ Welcome! This document is your **roadmap to understanding the entire project**. 
 4. DEPLOYMENT_CHECKLIST.md (5 min)
 ```
 
-### **Path 4: "I'm integrating a mobile app" (30 min)**
+### **Path 4: "I'm integrating a mobile app" (60 min)**
 ```
 1. README.md (5 min)
 2. MOBILE_APP_GUIDE.md (15 min)
-3. API_DOCUMENTATION.md (10 min)
-4. CI_AND_SECRETS.md (5 min — understand SECRET_KEY)
+3. OFFLINE_TRANSACTION_WORKFLOW.md (30 min) — complete transaction flow
+4. QR_PAYLOAD_ANALYSIS.md (15 min) — QR code implementation details
+5. API_DOCUMENTATION.md (10 min)
+6. CI_AND_SECRETS.md (5 min — understand SECRET_KEY)
 ```
 
-### **Path 5: "I want to understand everything (full deep dive)" (90 min)**
+### **Path 5: "I want to understand everything (full deep dive)" (135 min)**
 ```
 1. README.md (5 min)
 2. COMPLETE_EXPLANATION.md (15 min)
@@ -143,6 +149,8 @@ Welcome! This document is your **roadmap to understanding the entire project**. 
 5. THREAT_MODEL.md (15 min)
 6. PRODUCTION_DEPLOYMENT.md (20 min)
 7. MOBILE_APP_GUIDE.md (15 min)
+8. OFFLINE_TRANSACTION_WORKFLOW.md (30 min) — complete transaction flow
+9. QR_PAYLOAD_ANALYSIS.md (15 min) — QR code implementation
 ```
 
 ### **Path 6: "I want to test my code before deploying to Render" (40 min)**
@@ -219,6 +227,8 @@ Offline-Payment-System-Android/
 | **How to run tests** | [TESTING.md](TESTING.md) | "Running Tests" |
 | **API endpoints** | [API_DOCUMENTATION.md](API_DOCUMENTATION.md) | Full reference |
 | **How to integrate mobile app** | [MOBILE_APP_GUIDE.md](MOBILE_APP_GUIDE.md) | Entire document |
+| **Offline transaction workflow** | [OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md) | Complete 5-step process |
+| **QR code payload fields** | [QR_PAYLOAD_ANALYSIS.md](QR_PAYLOAD_ANALYSIS.md) | Field analysis & recommendations |
 | **How to deploy to production** | [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) | Step-by-step |
 | **How to set up GitHub Secrets** | [CI_AND_SECRETS.md](CI_AND_SECRETS.md) or [GITHUB_SECRETS_QUICK_SETUP.md](GITHUB_SECRETS_QUICK_SETUP.md) | Setup instructions |
 | **How JWT tokens work** | [COMPLETE_EXPLANATION.md](COMPLETE_EXPLANATION.md) | "How Does SECRET_KEY Work?" |

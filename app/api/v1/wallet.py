@@ -388,6 +388,7 @@ def get_transfer_history(
 @router.post("/qr-code", response_model=QRCodeResponse)
 def generate_qr_code(
     payload: QRCodeRequest,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -415,11 +416,15 @@ def generate_qr_code(
             detail="Wallet does not have a public key"
         )
     
-    # Create QR payload
-    qr_data = CryptoManager.create_qr_payload(
-        public_key=wallet.public_key,
-        user_id=current_user.id,
-        wallet_id=wallet.id
+    # Create Payee QR payload (new MVP format)
+    # Use device fingerprint as deviceId, user ID as payeeId
+    from app.core.device_fingerprint import get_device_fingerprint
+    device_id = get_device_fingerprint()  # Get from request headers or generate
+    
+    qr_data = CryptoManager.create_payee_qr_payload(
+        payee_id=str(current_user.id),
+        payee_name=current_user.name,
+        device_id=device_id
     )
     
     # Generate QR code image
