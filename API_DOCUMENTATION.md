@@ -185,11 +185,11 @@ Revoke refresh token.
 
 All wallet endpoints require authentication.
 
-### 1. Create Wallet
+### 1. Initiate Wallet Creation
 
-Create a new current or offline wallet.
+Request wallet creation (sends OTP email for verification).
 
-**Endpoint**: `POST /api/v1/wallets/`
+**Endpoint**: `POST /api/v1/wallets/create-request`
 
 **Headers**:
 ```
@@ -200,13 +200,47 @@ Authorization: Bearer {access_token}
 ```json
 {
   "wallet_type": "offline",
-  "currency": "PKR"
+  "currency": "PKR",
+  "bank_account_number": "1234567890"
 }
 ```
 
 **Wallet Types**:
 - `current`: Online wallet (standard banking)
 - `offline`: Offline wallet with cryptographic keys
+
+**Response** (200):
+```json
+{
+  "msg": "Wallet creation initiated. Check your email for verification code.",
+  "otp_demo": "123456"
+}
+```
+
+**Email Service**: Sends OTP via SendGrid/SMTP
+
+---
+
+### 2. Verify and Create Wallet
+
+Verify OTP and create wallet with bank account.
+
+**Endpoint**: `POST /api/v1/wallets/create-verify`
+
+**Headers**:
+```
+Authorization: Bearer {access_token}
+```
+
+**Request Body**:
+```json
+{
+  "wallet_type": "offline",
+  "currency": "PKR",
+  "bank_account_number": "1234567890",
+  "otp": "123456"
+}
+```
 
 **Response** (201):
 ```json
@@ -223,9 +257,19 @@ Authorization: Bearer {access_token}
 }
 ```
 
+**Note**: This endpoint generates RSA 2048-bit key pair for offline wallets.
+
 ---
 
-### 2. List Wallets
+### 3. Create Wallet (Deprecated)
+
+**Endpoint**: `POST /api/v1/wallets/`
+
+**Status**: Deprecated - Use `create-request` and `create-verify` instead.
+
+---
+
+### 4. List Wallets
 
 Get all wallets for authenticated user.
 
@@ -266,7 +310,7 @@ Authorization: Bearer {access_token}
 
 ---
 
-### 3. Get Wallet Details
+### 5. Get Wallet Details
 
 Get specific wallet information.
 
@@ -294,7 +338,7 @@ Authorization: Bearer {access_token}
 
 ---
 
-### 4. Transfer Between Wallets (Preload Offline Wallet)
+### 6. Transfer Between Wallets (Preload Offline Wallet)
 
 Transfer money from current wallet to offline wallet.
 
@@ -332,7 +376,7 @@ Authorization: Bearer {access_token}
 
 ---
 
-### 5. Get Transfer History
+### 7. Get Transfer History
 
 Get wallet transfer history.
 
@@ -365,7 +409,7 @@ Authorization: Bearer {access_token}
 
 ---
 
-### 6. Generate QR Code
+### 8. Generate QR Code
 
 Generate QR code for receiving offline payments.
 
@@ -403,7 +447,7 @@ Authorization: Bearer {access_token}
 
 ---
 
-### 7. Get Wallet Private Key
+### 9. Get Wallet Private Key
 
 Retrieve private key for offline wallet (sensitive operation).
 
@@ -424,6 +468,83 @@ Authorization: Bearer {access_token}
 ```
 
 **⚠️ Security Warning**: This endpoint should require additional authentication in production (e.g., PIN, biometric).
+
+---
+
+### 10. Request Wallet Top-Up
+
+Request wallet top-up (sends OTP email for verification).
+
+**Endpoint**: `POST /api/v1/wallets/topup`
+
+**Headers**:
+```
+Authorization: Bearer {access_token}
+```
+
+**Request Body**:
+```json
+{
+  "wallet_id": 2,
+  "amount": "500.00",
+  "password": "SecurePass@123",
+  "bank_account_number": "1234567890"
+}
+```
+
+**Response** (200):
+```json
+{
+  "msg": "Top-up request received. Check your email for verification code.",
+  "otp_demo": "123456"
+}
+```
+
+**Email Service**: Sends OTP via SendGrid/SMTP
+
+**Validation**:
+- Password verification required
+- Offline wallet balance cannot exceed 5000 PKR
+- Wallet must exist and be active
+
+---
+
+### 11. Verify Top-Up
+
+Verify top-up OTP and update wallet balance.
+
+**Endpoint**: `POST /api/v1/wallets/topup/verify`
+
+**Headers**:
+```
+Authorization: Bearer {access_token}
+```
+
+**Request Body**:
+```json
+{
+  "wallet_id": 2,
+  "otp": "123456",
+  "amount": "500.00",
+  "bank_account_number": "1234567890"
+}
+```
+
+**Response** (200):
+```json
+{
+  "msg": "Top-up successful",
+  "wallet_id": 2,
+  "new_balance": "500.00",
+  "amount_added": "500.00"
+}
+```
+
+**Validation**:
+- OTP must be valid and not expired (10 minutes)
+- Bank account number must match
+- Amount must match original request
+- Offline wallet balance cannot exceed 5000 PKR
 
 ---
 
