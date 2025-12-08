@@ -168,19 +168,68 @@ def sync_offline_transactions(
     """
     Sync offline transactions from mobile device to server.
     This is called when the user comes online.
-    Validates all transactions and updates the global ledger.
+    
+    Performs lightweight validation and updates wallet balances.
+    Returns detailed results for each transaction (synced or failed).
     """
-    synced_transactions = []
-    failed_transactions = []
+    results = []
     
     for tx_data in payload.transactions:
+        transaction_id = None
+        transaction_reference = None
+        result_status = "failed"
+        error_reason = None
+        
         try:
             # Extract transaction details
             transaction_data = tx_data.get("transaction_data", {})
             signature = tx_data.get("signature")
             receipt = tx_data.get("receipt", {})
             
-            # Validate sender's wallet
+            # Get transaction reference (nonce or txId)
+            transaction_reference = transaction_data.get("nonce") or tx_data.get("txId") or tx_data.get("transaction_id")
+            
+            # Validation 1: Required fields present
+            required_fields = ["sender_wallet_id", "receiver_public_key", "amount", "currency", "nonce"]
+            missing_fields = [field for field in required_fields if not transaction_data.get(field)]
+            if missing_fields:
+                error_reason = f"Missing required fields: {', '.join(missing_fields)}"
+                results.append({
+                    "transaction_id": transaction_reference,
+                    "reference": transaction_reference,
+                    "result": "failed",
+                    "error_reason": error_reason
+                })
+                continue
+            
+            # Validation 2: Signature field exists (don't verify crypto yet)
+            if not signature:
+                error_reason = "Signature field is missing"
+                results.append({
+                    "transaction_id": transaction_reference,
+                    "reference": transaction_reference,
+                    "result": "failed",
+                    "error_reason": error_reason
+                })
+                continue
+            
+            # Validation 3: Nonce is unique
+            nonce = transaction_data.get("nonce")
+            existing_tx = db.query(OfflineTransaction).filter(
+                OfflineTransaction.nonce == nonce
+            ).first()
+            
+            if existing_tx:
+                error_reason = "Duplicate transaction (nonce already exists)"
+                results.append({
+                    "transaction_id": transaction_reference,
+                    "reference": transaction_reference,
+                    "result": "failed",
+                    "error_reason": error_reason
+                })
+                continue
+            
+            # Validation 4: Sender wallet exists
             sender_wallet_id = transaction_data.get("sender_wallet_id")
             sender_wallet = db.query(Wallet).filter(
                 Wallet.id == sender_wallet_id,
@@ -189,77 +238,108 @@ def sync_offline_transactions(
             ).first()
             
             if not sender_wallet:
-                failed_transactions.append({
-                    "transaction": transaction_data,
-                    "error": "Sender's wallet not found"
+                error_reason = "Sender wallet not found or does not belong to user"
+                results.append({
+                    "transaction_id": transaction_reference,
+                    "reference": transaction_reference,
+                    "result": "failed",
+                    "error_reason": error_reason
                 })
                 continue
             
-            # Verify signature
-            is_valid = CryptoManager.verify_signature(
-                transaction_data,
-                signature,
-                sender_wallet.public_key
-            )
-            
-            if not is_valid:
-                failed_transactions.append({
-                    "transaction": transaction_data,
-                    "error": "Invalid signature"
+            # Validation 5: Amount > 0
+            try:
+                amount = Decimal(str(transaction_data["amount"]))
+                if amount <= 0:
+                    error_reason = "Amount must be greater than 0"
+                    results.append({
+                        "transaction_id": transaction_reference,
+                        "reference": transaction_reference,
+                        "result": "failed",
+                        "error_reason": error_reason
+                    })
+                    continue
+            except (ValueError, TypeError):
+                error_reason = "Invalid amount format"
+                results.append({
+                    "transaction_id": transaction_reference,
+                    "reference": transaction_reference,
+                    "result": "failed",
+                    "error_reason": error_reason
                 })
                 continue
             
-            # Check for duplicate nonce (replay attack prevention)
-            nonce = transaction_data.get("nonce")
-            existing_tx = db.query(OfflineTransaction).filter(
-                OfflineTransaction.nonce == nonce
-            ).first()
-            
-            if existing_tx:
-                failed_transactions.append({
-                    "transaction": transaction_data,
-                    "error": "Duplicate transaction (replay attack detected)"
-                })
-                continue
-            
-            # Create offline transaction record
+            # All validations passed - create transaction record
             offline_tx = OfflineTransaction(
                 sender_wallet_id=sender_wallet_id,
                 receiver_public_key=transaction_data["receiver_public_key"],
-                amount=Decimal(transaction_data["amount"]),
+                amount=amount,
                 currency=transaction_data["currency"],
                 transaction_signature=signature,
                 nonce=nonce,
                 receipt_hash=receipt.get("receipt_hash", ""),
-                receipt_data=json.dumps(receipt),
+                receipt_data=json.dumps(receipt) if receipt else "{}",
                 status="synced",
-                created_at_device=datetime.fromisoformat(transaction_data["timestamp"]),
+                created_at_device=datetime.fromisoformat(transaction_data.get("timestamp", datetime.utcnow().isoformat())),
                 synced_at=datetime.utcnow(),
                 device_fingerprint=tx_data.get("device_fingerprint")
             )
             
             db.add(offline_tx)
-            synced_transactions.append({
-                "nonce": nonce,
-                "amount": transaction_data["amount"],
-                "status": "synced"
+            db.flush()  # Flush to get the transaction ID
+            
+            transaction_id = offline_tx.id
+            
+            # Update sender wallet balance (deduct amount)
+            sender_wallet.balance = Decimal(str(sender_wallet.balance)) - amount
+            db.add(sender_wallet)
+            
+            # Update receiver wallet balance (add amount)
+            # Find receiver's wallet by public key
+            receiver_wallet = db.query(Wallet).filter(
+                Wallet.public_key == transaction_data["receiver_public_key"],
+                Wallet.wallet_type == "offline"
+            ).first()
+            
+            if receiver_wallet:
+                receiver_wallet.balance = Decimal(str(receiver_wallet.balance)) + amount
+                db.add(receiver_wallet)
+            
+            # Success - transaction synced
+            result_status = "synced"
+            results.append({
+                "transaction_id": transaction_id,
+                "reference": transaction_reference,
+                "result": "synced",
+                "error_reason": None
             })
             
         except Exception as e:
-            failed_transactions.append({
-                "transaction": tx_data,
-                "error": str(e)
+            # Catch any unexpected errors
+            error_reason = f"Server error: {str(e)}"
+            results.append({
+                "transaction_id": transaction_id,
+                "reference": transaction_reference,
+                "result": "failed",
+                "error_reason": error_reason
             })
     
-    # Commit all synced transactions
-    db.commit()
+    # Commit all changes
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        # If commit fails, mark all as failed
+        for result in results:
+            if result["result"] == "synced":
+                result["result"] = "failed"
+                result["error_reason"] = f"Database commit failed: {str(e)}"
     
     return {
-        "message": f"Synced {len(synced_transactions)} transactions",
-        "synced": synced_transactions,
-        "failed": failed_transactions,
-        "total_synced": len(synced_transactions),
-        "total_failed": len(failed_transactions)
+        "message": f"Processed {len(results)} transactions",
+        "results": results,
+        "total_synced": sum(1 for r in results if r["result"] == "synced"),
+        "total_failed": sum(1 for r in results if r["result"] == "failed")
     }
 
 
