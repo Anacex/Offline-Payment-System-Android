@@ -213,14 +213,14 @@ def sync_offline_transactions(
                 })
                 continue
             
-            # Validation 3: Nonce is unique
+            # Validation 3: Nonce is unique (per sender; globally unique in DB)
             nonce = transaction_data.get("nonce")
             existing_tx = db.query(OfflineTransaction).filter(
                 OfflineTransaction.nonce == nonce
             ).first()
             
             if existing_tx:
-                error_reason = "Duplicate transaction (nonce already exists)"
+                error_reason = "Duplicate transaction for this sender (nonce already exists)"
                 results.append({
                     "transaction_id": transaction_reference,
                     "reference": transaction_reference,
@@ -247,6 +247,19 @@ def sync_offline_transactions(
                 })
                 continue
             
+            # Validation 5a: Sender has sufficient balance
+            try:
+                current_balance = Decimal(str(sender_wallet.balance))
+            except Exception:
+                error_reason = "Invalid sender balance"
+                results.append({
+                    "transaction_id": transaction_reference,
+                    "reference": transaction_reference,
+                    "result": "failed",
+                    "error_reason": error_reason
+                })
+                continue
+            
             # Validation 5: Amount > 0
             try:
                 amount = Decimal(str(transaction_data["amount"]))
@@ -261,6 +274,17 @@ def sync_offline_transactions(
                     continue
             except (ValueError, TypeError):
                 error_reason = "Invalid amount format"
+                results.append({
+                    "transaction_id": transaction_reference,
+                    "reference": transaction_reference,
+                    "result": "failed",
+                    "error_reason": error_reason
+                })
+                continue
+            
+            # Validation 6: Balance check (after amount parsed)
+            if current_balance < amount:
+                error_reason = "Insufficient balance in sender wallet"
                 results.append({
                     "transaction_id": transaction_reference,
                     "reference": transaction_reference,
@@ -341,6 +365,19 @@ def sync_offline_transactions(
         "total_synced": sum(1 for r in results if r["result"] == "synced"),
         "total_failed": sum(1 for r in results if r["result"] == "failed")
     }
+
+
+@router.post("/offline-sync", status_code=status.HTTP_200_OK)
+def sync_offline_transactions_alias(
+    payload: OfflineTransactionSync,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Alias endpoint for cleaner semantics.
+    Forwards to /api/v1/offline-transactions/sync with identical logic.
+    """
+    return sync_offline_transactions(payload=payload, current_user=current_user, db=db)
 
 
 @router.post("/verify-receipt", status_code=status.HTTP_200_OK)
