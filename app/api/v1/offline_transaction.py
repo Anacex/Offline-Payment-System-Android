@@ -195,7 +195,7 @@ def sync_offline_transactions(
             if missing_fields:
                 error_reason = f"Missing required fields: {', '.join(missing_fields)}"
                 results.append({
-                    "transaction_id": transaction_reference,
+                    "transaction_id": None,
                     "reference": transaction_reference,
                     "result": "failed",
                     "error_reason": error_reason
@@ -206,7 +206,7 @@ def sync_offline_transactions(
             if not signature:
                 error_reason = "Signature field is missing"
                 results.append({
-                    "transaction_id": transaction_reference,
+                    "transaction_id": None,
                     "reference": transaction_reference,
                     "result": "failed",
                     "error_reason": error_reason
@@ -222,7 +222,7 @@ def sync_offline_transactions(
             if existing_tx:
                 error_reason = "Duplicate transaction for this sender (nonce already exists)"
                 results.append({
-                    "transaction_id": transaction_reference,
+                    "transaction_id": None,
                     "reference": transaction_reference,
                     "result": "failed",
                     "error_reason": error_reason
@@ -240,7 +240,7 @@ def sync_offline_transactions(
             if not sender_wallet:
                 error_reason = "Sender wallet not found or does not belong to user"
                 results.append({
-                    "transaction_id": transaction_reference,
+                    "transaction_id": None,
                     "reference": transaction_reference,
                     "result": "failed",
                     "error_reason": error_reason
@@ -253,7 +253,7 @@ def sync_offline_transactions(
             except Exception:
                 error_reason = "Invalid sender balance"
                 results.append({
-                    "transaction_id": transaction_reference,
+                    "transaction_id": None,
                     "reference": transaction_reference,
                     "result": "failed",
                     "error_reason": error_reason
@@ -266,7 +266,7 @@ def sync_offline_transactions(
                 if amount <= 0:
                     error_reason = "Amount must be greater than 0"
                     results.append({
-                        "transaction_id": transaction_reference,
+                        "transaction_id": None,
                         "reference": transaction_reference,
                         "result": "failed",
                         "error_reason": error_reason
@@ -275,7 +275,7 @@ def sync_offline_transactions(
             except (ValueError, TypeError):
                 error_reason = "Invalid amount format"
                 results.append({
-                    "transaction_id": transaction_reference,
+                    "transaction_id": None,
                     "reference": transaction_reference,
                     "result": "failed",
                     "error_reason": error_reason
@@ -286,7 +286,7 @@ def sync_offline_transactions(
             if current_balance < amount:
                 error_reason = "Insufficient balance in sender wallet"
                 results.append({
-                    "transaction_id": transaction_reference,
+                    "transaction_id": None,
                     "reference": transaction_reference,
                     "result": "failed",
                     "error_reason": error_reason
@@ -342,7 +342,7 @@ def sync_offline_transactions(
             # Catch any unexpected errors
             error_reason = f"Server error: {str(e)}"
             results.append({
-                "transaction_id": transaction_id,
+                "transaction_id": None,
                 "reference": transaction_reference,
                 "result": "failed",
                 "error_reason": error_reason
