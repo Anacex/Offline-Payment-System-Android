@@ -183,7 +183,8 @@ def sync_offline_transactions(
         try:
             # Extract transaction details
             transaction_data = tx_data.get("transaction_data", {})
-            signature = tx_data.get("signature")
+            # Accept placeholder signature if not provided (MVP mode)
+            signature = tx_data.get("signature") or "placeholder_signature"
             receipt = tx_data.get("receipt", {})
             
             # Get transaction reference (nonce or txId)
@@ -194,17 +195,6 @@ def sync_offline_transactions(
             missing_fields = [field for field in required_fields if not transaction_data.get(field)]
             if missing_fields:
                 error_reason = f"Missing required fields: {', '.join(missing_fields)}"
-                results.append({
-                    "transaction_id": None,
-                    "reference": transaction_reference,
-                    "result": "failed",
-                    "error_reason": error_reason
-                })
-                continue
-            
-            # Validation 2: Signature field exists (don't verify crypto yet)
-            if not signature:
-                error_reason = "Signature field is missing"
                 results.append({
                     "transaction_id": None,
                     "reference": transaction_reference,
