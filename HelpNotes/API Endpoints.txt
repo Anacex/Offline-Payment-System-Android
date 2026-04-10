@@ -1,0 +1,9 @@
+Endpoint                |  Method  |  Purpose                                               
+------------------------+----------+--------------------------------------------------------
+/users/                 |  GET     |  List users                                            
+/users/                 |  POST    |  Create new user                                       
+/users/{user_id}        |  GET     |  Get user details                                      
+/users/{user_id}/topup  |  POST    |  Top up user's offline wallet (bank credit → wallet)   
+/transactions/          |  GET     |  List all transactions                                 
+/transactions/          |  POST    |  Create transaction (offline claim or direct bank push)
+/sync/                  |  POST    |  Sync a batch of offline transactions from merchant app

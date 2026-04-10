@@ -1,0 +1,54 @@
+Team Documentation: Offline Payment System Backend
+
+1. Project Initialization
+Set up a FastAPI backend for an offline payment system using Docker Compose.
+
+Created two main services: web (FastAPI app) and db (PostgreSQL database).
+
+Ensured the backend and database communicate via Docker networking.
+
+2. Database and Models
+Defined SQLAlchemy models for User and Transaction.
+
+User: Fields include id, name, email, balance, and role (payer, merchant, admin).
+
+Transaction: Fields include id, from_user_id, to_user_id, amount, token, sequence_number, status, and timestamp.
+
+Used Pydantic models for request validation.
+
+3. Database Migration and Troubleshooting
+
+Ran init_db.py to create tables in the database.
+
+Fixed schema mismatches by dropping and recreating tables/databases as needed.
+
+4. API Endpoints
+
+Implemented and tested endpoints for:
+
+Creating users (POST /users/)
+
+Listing users (GET /users/)
+
+Creating transactions (POST /transactions/)
+
+Listing transactions (GET /transactions/)
+
+Used Swagger UI (/docs) for interactive API testing.
+
+5. Error Handling and Debugging
+
+Added duplicate checks for user emails and transaction tokens.
+
+Handled validation errors and provided meaningful error responses.
+
+6. Docker Workflow
+
+expected that team will learn on their own
+
+7. Next Steps
+Add more endpoints (top-up, sync, etc.).
+
+Write unit tests using pytest and FastAPI’s TestClient.
+
+Document API endpoints and usage for frontend/mobile integration.

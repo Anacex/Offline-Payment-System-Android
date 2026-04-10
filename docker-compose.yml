@@ -1,0 +1,45 @@
+# Local development: API + PostgreSQL (+ extensions, SQLAlchemy schema, SQL migration).
+# Production (Render + Supabase) is unchanged: still `uvicorn main:app` on Render with managed DB.
+#
+# Usage:
+#   docker compose up -d
+# API: http://localhost:8000  |  DB: localhost:5432 (same credentials as below)
+#
+# To run only the database and use a host venv + uvicorn (previous workflow):
+#   docker compose up -d db
+#   DATABASE_URL=postgresql+psycopg2://offlinepay_user:offlinepay123@localhost:5432/offlinepay REQUIRE_SSL=false uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: offlinepay_user
+      POSTGRES_PASSWORD: offlinepay123
+      POSTGRES_DB: offlinepay
+    ports:
+      - "5432:5432"
+    volumes:
+      - offlinepay_pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init-extensions.sql:/docker-entrypoint-initdb.d/01-extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U offlinepay_user -d offlinepay"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Service hostname is `db` inside the compose network (not localhost).
+      DATABASE_URL: postgresql+psycopg2://offlinepay_user:offlinepay123@db:5432/offlinepay
+      REQUIRE_SSL: "false"
+      DEBUG: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  offlinepay_pgdata:

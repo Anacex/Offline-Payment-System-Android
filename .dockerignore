@@ -1,0 +1,24 @@
+# Backend image only — Android tree and Gradle outputs are not needed.
+Android App
+
+.venv
+venv
+__pycache__
+*.py[cod]
+*$py.class
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.sqlite
+*.sqlite3
+terminals
+.coverage
+htmlcov
+dist
+build
+*.egg-info
