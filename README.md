@@ -16,7 +16,7 @@ This is the canonical entry point for new contributors. It links to focused docu
 - Deploy checklist: DEPLOYMENT_CHECKLIST.md
 - Project index & additional docs: DOCUMENTATION_INDEX.md
 - Threat model & security: THREAT_MODEL.md
-- Mobile integration guide: MOBILE_APP_GUIDE.md
+- Mobile integration guide: MOBILE_APP_GUIDE.md 
 - **Offline transaction workflow: [OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md)** ← Complete transaction flow documentation
 - **Android app (BLE vs QR data channels, wire format): [Android-App/README.md](Android-App/README.md)** ← Bluetooth ack handshake; transaction fields only on QR
 - **QR payload analysis: [QR_PAYLOAD_ANALYSIS.md](QR_PAYLOAD_ANALYSIS.md)** ← QR code field analysis & recommendations
