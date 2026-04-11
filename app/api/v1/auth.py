@@ -9,6 +9,7 @@ from app.core import security
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.account_status import raise_if_account_blocked
 from app.core.validators import SecurityValidator
 from app.core.otp_service import (
     PURPOSE_LOGIN_UNVERIFIED,
@@ -164,6 +165,8 @@ def login_step1(email: str = Body(...), password: str = Body(...), device_finger
     if not user or not security.verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
+    raise_if_account_blocked(user)
+
     # If email is verified, skip OTP and directly issue tokens
     if user.is_email_verified:
         access_token = security.create_access_token(subject=str(user.id), device_fingerprint=device_fingerprint)
@@ -274,6 +277,8 @@ def login_confirm(email: str = Body(...), otp: str = Body(...), nonce: str = Bod
     user = db.query(User).filter(func.lower(User.email) == subj).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    raise_if_account_blocked(user)
 
     if not user.is_email_verified:
         user.is_email_verified = True
@@ -438,6 +443,10 @@ def token_refresh(refresh_token: str = Body(...), device_fingerprint: str = Body
         raise HTTPException(status_code=401, detail="Refresh token revoked or not found")
     if rt_record.device_fingerprint != device_fingerprint:
         raise HTTPException(status_code=401, detail="Device mismatch")
+
+    user = db.query(User).filter(User.id == rt_record.user_id).first()
+    if user:
+        raise_if_account_blocked(user)
 
     # issue new access token
     access_token = security.create_access_token(subject=str(rt_record.user_id), device_fingerprint=device_fingerprint)

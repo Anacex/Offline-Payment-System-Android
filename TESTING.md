@@ -29,6 +29,15 @@ Run a single test file or test:
 pytest tests/test_auth.py::test_logout_success -q -s
 ```
 
+## Manual QA: account suspension and ledger tail (demo / Supabase)
+
+Automated tests cover blocked login and ledger-driven suspension (`tests/test_auth.py`, `tests/test_sync.py`). For a **manual** demo on a real database:
+
+1. **Auth / UI only:** set `users.account_blocked` (and optionally `fraud_review_pending`) for your user in Supabase; no sync required. The app should show the suspension flow on next login or when `/auth/me` runs.
+2. **Ledger path:** you need a **pending** sync with full ledger fields; then alter **`device_ledger_heads`** so `last_entry_hash` or `last_sequence` does not match what the app sends next — sync fails with `LEDGER_INTEGRITY_*` and the backend sets the same user flags.
+
+Full step-by-step and cleanup: **[OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md#manual-testing-account-suspension-and-ledger-tail)**.
+
 ## Test DB strategy (local unit tests)
 
 The repository uses a safe local test database configuration so unit tests do not hit Supabase or production resources. Key points:

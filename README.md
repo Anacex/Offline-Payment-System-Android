@@ -18,6 +18,7 @@ This is the canonical entry point for new contributors. It links to focused docu
 - Threat model & security: THREAT_MODEL.md
 - Mobile integration guide: MOBILE_APP_GUIDE.md
 - **Offline transaction workflow: [OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md)** ← Complete transaction flow documentation
+- **Android app (BLE vs QR data channels, wire format): [Android-App/README.md](Android-App/README.md)** ← Bluetooth ack handshake; transaction fields only on QR
 - **QR payload analysis: [QR_PAYLOAD_ANALYSIS.md](QR_PAYLOAD_ANALYSIS.md)** ← QR code field analysis & recommendations
 
 ## Recommended first steps for a new developer
@@ -50,6 +51,8 @@ DEBUG=true
 ```powershell
 python -m app.db_init
 ```
+
+**Supabase / managed PostgreSQL:** On each API **startup**, `app/main.py` runs `Base.metadata.create_all()`, which **creates any missing tables** (for example `device_ledger_heads`) but does **not** add new **columns** to tables that already exist (for example new `users.*` suspension fields). For an existing Supabase project, run the idempotent script once in the SQL Editor: [`migrations/supabase_ledger_and_account_blocking.sql`](migrations/supabase_ledger_and_account_blocking.sql). Fresh installs can rely on startup + `python -m app.db_init` for a full schema.
 
 4. Run the server:
 
@@ -132,6 +135,13 @@ If this looks good I will delete the old archived docs to remove clutter (you as
 - `GET /api/v1/transactions/` - List transactions
 - `POST /api/v1/transactions/` - Create transaction
 
+## ✨ Current product features (high level)
+
+- **Offline payments** via QR (and optional BLE confirmation path on Android); local pending queue until online sync.
+- **Hash-chained local ledger** on the device (AES-GCM for sensitive JSON at rest) with deterministic integrity payloads; **server verifies** the chain on `/api/v1/offline-transactions/sync` and stores per-device tail in **`device_ledger_heads`**.
+- **Fraud / tamper response:** any failed chained-ledger check during sync sets **`users.account_blocked`**, **`fraud_review_pending`**, and a reason; the account cannot use protected APIs or obtain new tokens until an operator **clears the flags in the database** (see migration SQL for an example `UPDATE`).
+- **Android:** dedicated **account under review** full-screen after login or when `/auth/me` returns suspension; user returns to sign-in after acknowledging.
+
 ## 🔒 Security Features
 
 ### Cryptography
@@ -143,6 +153,7 @@ If this looks good I will delete the old archived docs to remove clutter (you as
 
 ### Attack Prevention
 - **Replay Attacks**: Unique nonce per transaction
+- **Local ledger tampering**: Hash chain + server verification; failed verification flags the account for manual review
 - **Double Spending**: Local + server-side balance checks
 - **MITM**: TLS encryption, certificate pinning (mobile)
 - **Brute Force**: Rate limiting, account lockout
@@ -161,6 +172,8 @@ If this looks good I will delete the old archived docs to remove clutter (you as
 ### Manual Testing
 
 Use Swagger UI at `http://localhost:8000/docs` for interactive testing.
+
+**Account suspension (blocked user / “under review” screen):** See **[OFFLINE_TRANSACTION_WORKFLOW.md — Manual testing: account suspension and ledger tail](OFFLINE_TRANSACTION_WORKFLOW.md#manual-testing-account-suspension-and-ledger-tail)**. Short version: (1) set `users.account_blocked = true` in Supabase to test login/`/auth/me` and the Android review screen without syncing; or (2) corrupt `device_ledger_heads.last_entry_hash` / `last_sequence` and then run a **chained** pending sync to trigger a **`LEDGER_INTEGRITY_*`** failure and automatic suspension.
 
 ### Example Test Flow
 

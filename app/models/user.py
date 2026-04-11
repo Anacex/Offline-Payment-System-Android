@@ -18,6 +18,12 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
+    # Suspension (e.g. ledger integrity failure on sync); cleared only via DB/admin.
+    account_blocked = Column(Boolean, default=False, nullable=False)
+    fraud_review_pending = Column(Boolean, default=False, nullable=False)
+    account_blocked_reason = Column(Text, nullable=True)
+    account_blocked_at = Column(DateTime, nullable=True)
+
     # wallet/account fields (simple placeholders) - DEPRECATED: Use Wallet model instead
     offline_balance = Column(Integer, default=0, nullable=False)
 

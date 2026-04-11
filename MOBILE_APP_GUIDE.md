@@ -4,6 +4,10 @@
 
 This guide provides detailed instructions for implementing the Android mobile application for the Offline Payment System. The mobile app is the client-side component that enables users to perform offline transactions.
 
+**Implemented Android app (this repo):** Offline payments use **QR codes** for transaction payloads. Optional **Bluetooth Low Energy** is used only for **signed acknowledgments** (receiver ack + sender OK). **Transaction fields are not sent on the BLE link**—only public key material, timestamps, and ECDSA signatures over canonical strings derived locally from the QR payload. See **[Android-App/README.md](Android-App/README.md)** for wire layout, eligibility checks, and file map; see **[OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md)** for how the BLE path fits the overall workflow.
+
+**Account suspension (demo):** The app shows a full-screen **Account under review** state when the API returns **403** with `detail.code === "ACCOUNT_BLOCKED"` (e.g. after setting `users.account_blocked` in Supabase, or after a failed chained-ledger sync). Step-by-step manual tests: **[OFFLINE_TRANSACTION_WORKFLOW.md § Manual testing](OFFLINE_TRANSACTION_WORKFLOW.md#manual-testing-account-suspension-and-ledger-tail)**.
+
 ---
 
 ## Architecture

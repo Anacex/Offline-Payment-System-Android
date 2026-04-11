@@ -1,5 +1,7 @@
 # Database Migration: Update Schema Constraints
 
+**Also see:** [`supabase_ledger_and_account_blocking.sql`](supabase_ledger_and_account_blocking.sql) — `device_ledger_heads` table and `users` suspension / fraud-review columns (ledger tamper response).
+
 ## What This Migration Does
 
 This migration adds missing constraints and indexes to align your Supabase database with the SQLAlchemy model definitions.

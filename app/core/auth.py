@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from .config import settings
 from .db import get_db
+from app.core.account_status import raise_if_account_blocked
 from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -27,4 +28,5 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.get(User, int(user_id))
     if not user:
         raise credentials_exception
+    raise_if_account_blocked(user)
     return user

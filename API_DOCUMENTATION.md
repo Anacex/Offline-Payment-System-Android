@@ -101,6 +101,21 @@ Initiate login and receive MFA OTP.
 }
 ```
 
+**Account suspended** (403): If `users.account_blocked` is set (e.g. after a failed offline **ledger integrity** sync), login and refresh return JSON such as:
+```json
+{
+  "detail": {
+    "code": "ACCOUNT_BLOCKED",
+    "message": "Your account is suspended pending manual review...",
+    "reason": "Device ledger integrity check failed during sync (LEDGER_INTEGRITY_HASH_MISMATCH). Queued for manual agent review.",
+    "fraud_review_pending": true
+  }
+}
+```
+Protected routes with a valid JWT also return **403** with the same shape until an operator clears the suspension in the database.
+
+**Manual testing:** Set `users.account_blocked = true` in Supabase (or Postgres) to test this response without running sync. To trigger suspension via the **ledger** instead, corrupt `device_ledger_heads` for that user/device and perform a sync that includes full chain fields; see [OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md#manual-testing-account-suspension-and-ledger-tail).
+
 ---
 
 ### 4. Login (Step 2 - Confirm MFA)

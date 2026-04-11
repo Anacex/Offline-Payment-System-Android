@@ -5,6 +5,8 @@ from datetime import datetime
 from decimal import Decimal
 import json
 from app.core.crypto import CryptoManager
+from app.api.v1.offline_transaction import GENESIS_PREV_HASH, _ledger_entry_hash_hex
+from app.models.wallet import DeviceLedgerHead
 
 from tests.auth_helpers import get_auth_headers
 
@@ -498,3 +500,131 @@ def test_sync_response_structure(client: TestClient, test_user_with_wallets, db_
         assert result["result"] in ["synced", "failed"]
         if result["result"] == "failed":
             assert "error_reason" in result
+
+
+@pytest.mark.unit
+def test_sync_ledger_incomplete_fields(client: TestClient, test_user_with_wallets):
+    """Partial ledger fields must be rejected."""
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    offline_wallet = test_user_with_wallets["offline_wallet"]
+
+    transaction_data = create_test_transaction_data(
+        offline_wallet.id,
+        "receiver_public_key_123",
+        50.00,
+    )
+    signature = CryptoManager.sign_transaction(transaction_data, offline_wallet.private_key_encrypted)
+    sync_req = create_sync_transaction_request(transaction_data, signature)
+    sync_req["ledger_entry_hash"] = "a" * 64
+
+    payload = {"transactions": [sync_req]}
+    response = client.post("/api/v1/offline-transactions/sync", json=payload, headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_synced"] == 0
+    assert body["total_failed"] == 1
+    assert body["results"][0]["error_reason"] == "LEDGER_INTEGRITY_INCOMPLETE_FIELDS"
+
+
+@pytest.mark.unit
+def test_sync_ledger_failure_flags_user_blocked(client: TestClient, test_user_with_wallets, db_session):
+    """Ledger integrity failure on sync suspends the sender account for review."""
+    from app.models.user import User
+
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    offline_wallet = test_user_with_wallets["offline_wallet"]
+
+    transaction_data = create_test_transaction_data(
+        offline_wallet.id,
+        "receiver_public_key_123",
+        50.00,
+    )
+    signature = CryptoManager.sign_transaction(transaction_data, offline_wallet.private_key_encrypted)
+    sync_req = create_sync_transaction_request(transaction_data, signature)
+    canon = '{"ledger":"tampered"}'
+    sync_req["ledger_prev_hash"] = GENESIS_PREV_HASH
+    sync_req["ledger_sequence"] = 1
+    sync_req["integrity_canonical_json"] = canon
+    sync_req["ledger_entry_hash"] = "f" * 64
+
+    payload = {"transactions": [sync_req]}
+    response = client.post("/api/v1/offline-transactions/sync", json=payload, headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_failed"] == 1
+
+    uid = test_user_with_wallets["user"].id
+    db_session.expire_all()
+    user = db_session.query(User).filter(User.id == uid).first()
+    assert user.account_blocked is True
+    assert user.fraud_review_pending is True
+    assert user.account_blocked_reason is not None
+
+
+@pytest.mark.unit
+def test_sync_ledger_hash_mismatch(client: TestClient, test_user_with_wallets):
+    """Wrong entry hash vs canonical JSON is flagged."""
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    offline_wallet = test_user_with_wallets["offline_wallet"]
+
+    transaction_data = create_test_transaction_data(
+        offline_wallet.id,
+        "receiver_public_key_123",
+        50.00,
+    )
+    signature = CryptoManager.sign_transaction(transaction_data, offline_wallet.private_key_encrypted)
+    sync_req = create_sync_transaction_request(transaction_data, signature)
+    canon = '{"ledger":"test"}'
+    sync_req["ledger_prev_hash"] = GENESIS_PREV_HASH
+    sync_req["ledger_sequence"] = 1
+    sync_req["integrity_canonical_json"] = canon
+    sync_req["ledger_entry_hash"] = "f" * 64
+
+    payload = {"transactions": [sync_req]}
+    response = client.post("/api/v1/offline-transactions/sync", json=payload, headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_synced"] == 0
+    assert body["total_failed"] == 1
+    assert body["results"][0]["error_reason"] == "LEDGER_INTEGRITY_HASH_MISMATCH"
+
+
+@pytest.mark.unit
+def test_sync_ledger_success_updates_head(client: TestClient, test_user_with_wallets, db_session):
+    """Valid chain fields sync and persist DeviceLedgerHead for the device."""
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    offline_wallet = test_user_with_wallets["offline_wallet"]
+
+    transaction_data = create_test_transaction_data(
+        offline_wallet.id,
+        "receiver_public_key_123",
+        50.00,
+    )
+    signature = CryptoManager.sign_transaction(transaction_data, offline_wallet.private_key_encrypted)
+    sync_req = create_sync_transaction_request(transaction_data, signature)
+    canon = '{"ledger":"ok"}'
+    entry = _ledger_entry_hash_hex(GENESIS_PREV_HASH, canon)
+    sync_req["ledger_prev_hash"] = GENESIS_PREV_HASH
+    sync_req["ledger_sequence"] = 1
+    sync_req["integrity_canonical_json"] = canon
+    sync_req["ledger_entry_hash"] = entry
+
+    payload = {"transactions": [sync_req]}
+    response = client.post("/api/v1/offline-transactions/sync", json=payload, headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_synced"] == 1
+    assert body["total_failed"] == 0
+
+    uid = test_user_with_wallets["user"].id
+    head = (
+        db_session.query(DeviceLedgerHead)
+        .filter(
+            DeviceLedgerHead.user_id == uid,
+            DeviceLedgerHead.device_fingerprint == "test_device_123",
+        )
+        .first()
+    )
+    assert head is not None
+    assert head.last_sequence == 1
+    assert head.last_entry_hash.lower() == entry.lower()

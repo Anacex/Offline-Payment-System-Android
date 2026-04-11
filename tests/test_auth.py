@@ -99,6 +99,29 @@ def test_verify_email_nonexistent_user(client: TestClient):
 
 
 @pytest.mark.unit
+def test_login_blocked_user_returns_account_blocked(client: TestClient, test_user, db_session):
+    """Suspended accounts cannot obtain tokens; client shows review screen."""
+    from app.models import User
+
+    u = db_session.query(User).filter(User.id == test_user["user"].id).first()
+    u.account_blocked = True
+    u.fraud_review_pending = True
+    u.account_blocked_reason = "Test suspension"
+    db_session.commit()
+
+    payload = {
+        "email": test_user["email"],
+        "password": test_user["password"],
+        "device_fingerprint": "device123",
+    }
+    response = client.post("/auth/login", json=payload)
+    assert response.status_code == 403
+    body = response.json()
+    assert body["detail"]["code"] == "ACCOUNT_BLOCKED"
+    assert "review" in body["detail"]["message"].lower() or "suspended" in body["detail"]["message"].lower()
+
+
+@pytest.mark.unit
 def test_login_success(client: TestClient, test_user):
     """Verified users get tokens immediately; unverified users get OTP challenge."""
     payload = {

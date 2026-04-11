@@ -20,6 +20,7 @@ This guide provides step-by-step instructions for deploying the Offline Payment 
 - [ ] Configure backup encryption
 
 ### Database
+- [ ] Apply schema updates for new releases (Supabase: SQL Editor). **`create_all` on API startup creates missing tables but does not ALTER existing ones** — use [`migrations/supabase_ledger_and_account_blocking.sql`](migrations/supabase_ledger_and_account_blocking.sql) for `device_ledger_heads` and user suspension columns if upgrading an existing database.
 - [ ] Use strong PostgreSQL password
 - [ ] Enable SSL for database connections
 - [ ] Set up automated backups

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from jose import JWTError
 from app.core.db import get_db
 from app.core import security
+from app.core.account_status import raise_if_account_blocked
 from app.models import User
 
 security_scheme = HTTPBearer()
@@ -25,6 +26,7 @@ def get_current_user(authorization=Depends(security_scheme), db: Session = Depen
     user = db.query(User).filter(User.id == int(user_id)).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    raise_if_account_blocked(user)
     return user
 
 def admin_required(user: User = Depends(get_current_user)):

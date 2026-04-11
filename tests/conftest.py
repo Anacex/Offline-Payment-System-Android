@@ -29,6 +29,7 @@ from sqlalchemy.orm import sessionmaker, Session
 # Import app and DB base AFTER setting DATABASE_URL
 from app.main import app
 from app.core import db as db_module
+from app.models.wallet import DeviceLedgerHead  # noqa: F401 — register model on Base before create_all
 
 # Import Base (declarative base) from the project. Adjust if located elsewhere.
 try:

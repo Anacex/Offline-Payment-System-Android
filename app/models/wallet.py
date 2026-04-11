@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Numeric, ForeignKey, Boolean, Text
+from sqlalchemy import Column, Integer, String, DateTime, Numeric, ForeignKey, Boolean, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 from .base import Base
 
@@ -74,6 +74,28 @@ class OfflineTransaction(Base):
     
     def __repr__(self):
         return f"<OfflineTransaction(id={self.id}, amount={self.amount}, status={self.status})>"
+
+
+class DeviceLedgerHead(Base):
+    """
+    Per-user, per-device tail of the offline hash chain. Used at sync to detect
+    tampering or replay of ledger fields relative to the last accepted entry.
+    """
+
+    __tablename__ = "device_ledger_heads"
+    __table_args__ = (
+        UniqueConstraint("user_id", "device_fingerprint", name="uq_device_ledger_user_device"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    device_fingerprint = Column(String(128), nullable=False, default="", server_default="")
+    last_entry_hash = Column(String(64), nullable=False)
+    last_sequence = Column(Integer, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<DeviceLedgerHead(user_id={self.user_id}, seq={self.last_sequence})>"
 
 
 class WalletTransfer(Base):

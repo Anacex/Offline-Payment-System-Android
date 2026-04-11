@@ -5,7 +5,8 @@ Handles offline transaction creation, signing, syncing, and verification.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional, Tuple
+import hashlib
 import json
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -14,7 +15,7 @@ from app.core.db import get_db
 from app.core.auth import get_current_user
 from app.core.crypto import CryptoManager
 from app.models.user import User
-from app.models.wallet import Wallet, OfflineTransaction
+from app.models.wallet import Wallet, OfflineTransaction, DeviceLedgerHead
 from app.schemas.wallet import (
     OfflineTransactionCreate, OfflineTransactionRead,
     OfflineTransactionSync, ReceiptVerification
@@ -24,6 +25,147 @@ router = APIRouter(
     prefix="/api/v1/offline-transactions",
     tags=["offline-transactions"],
 )
+
+
+# Must match Android [com.offlinepayment.security.OfflineLedgerChain.GENESIS_PREV_HASH].
+GENESIS_PREV_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
+
+
+def _ledger_entry_hash_hex(prev_hex: str, integrity_canonical_json: str) -> str:
+    h = hashlib.sha256()
+    h.update(f"{prev_hex}|{integrity_canonical_json}".encode("utf-8"))
+    return h.hexdigest()
+
+
+def _is_hex64(h: str) -> bool:
+    if not isinstance(h, str) or len(h) != 64:
+        return False
+    try:
+        int(h, 16)
+        return True
+    except ValueError:
+        return False
+
+
+def _device_fp_key(tx_data: dict) -> str:
+    v = tx_data.get("device_fingerprint")
+    return (v or "").strip() if isinstance(v, str) else ""
+
+
+def _ledger_payload_status(tx_data: dict) -> str:
+    """none = no chain fields; partial = inconsistent; full = all four present."""
+    prev = tx_data.get("ledger_prev_hash")
+    entry = tx_data.get("ledger_entry_hash")
+    seq = tx_data.get("ledger_sequence")
+    canon = tx_data.get("integrity_canonical_json")
+    present = [
+        prev is not None and str(prev).strip() != "",
+        entry is not None and str(entry).strip() != "",
+        seq is not None,
+        canon is not None and str(canon).strip() != "",
+    ]
+    if not any(present):
+        return "none"
+    if all(present):
+        return "full"
+    return "partial"
+
+
+def _verify_ledger_chain(
+    tx_data: dict,
+    db: Session,
+    user_id: int,
+) -> Optional[str]:
+    """
+    Validates hash-chained ledger payload for this sync row.
+    Returns None if OK or chain not used; otherwise a machine-readable error token.
+    """
+    st = _ledger_payload_status(tx_data)
+    if st == "none":
+        return None
+    if st == "partial":
+        return "LEDGER_INTEGRITY_INCOMPLETE_FIELDS"
+
+    prev = str(tx_data.get("ledger_prev_hash")).strip()
+    entry = str(tx_data.get("ledger_entry_hash")).strip()
+    canon = str(tx_data.get("integrity_canonical_json"))
+    try:
+        seq = int(tx_data.get("ledger_sequence"))
+    except (TypeError, ValueError):
+        return "LEDGER_INTEGRITY_INVALID_SEQUENCE"
+    if seq < 1:
+        return "LEDGER_INTEGRITY_INVALID_SEQUENCE"
+
+    if not _is_hex64(prev) or not _is_hex64(entry):
+        return "LEDGER_INTEGRITY_INVALID_HASH_FORMAT"
+
+    fp_key = _device_fp_key(tx_data)
+
+    exp_prev, exp_seq = _get_expected_ledger_state(db, user_id, fp_key)
+    if prev != exp_prev:
+        return "LEDGER_INTEGRITY_PREV_MISMATCH"
+    if seq != exp_seq:
+        return "LEDGER_INTEGRITY_SEQUENCE_MISMATCH"
+
+    computed = _ledger_entry_hash_hex(prev, canon)
+    if computed.lower() != entry.lower():
+        return "LEDGER_INTEGRITY_HASH_MISMATCH"
+
+    return None
+
+
+def _get_expected_ledger_state(db: Session, user_id: int, device_fp: str) -> Tuple[str, int]:
+    key = (device_fp or "").strip()
+    row = (
+        db.query(DeviceLedgerHead)
+        .filter(
+            DeviceLedgerHead.user_id == user_id,
+            DeviceLedgerHead.device_fingerprint == key,
+        )
+        .first()
+    )
+    if row:
+        return (row.last_entry_hash, int(row.last_sequence) + 1)
+    return (GENESIS_PREV_HASH, 1)
+
+
+def _persist_ledger_head(db: Session, user_id: int, device_fp: str, entry_hash: str, sequence: int) -> None:
+    key = (device_fp or "").strip()
+    row = (
+        db.query(DeviceLedgerHead)
+        .filter(
+            DeviceLedgerHead.user_id == user_id,
+            DeviceLedgerHead.device_fingerprint == key,
+        )
+        .first()
+    )
+    if not row:
+        db.add(
+            DeviceLedgerHead(
+                user_id=user_id,
+                device_fingerprint=key,
+                last_entry_hash=entry_hash,
+                last_sequence=sequence,
+            )
+        )
+    else:
+        row.last_entry_hash = entry_hash
+        row.last_sequence = sequence
+
+
+def _flag_user_for_ledger_fraud(db: Session, user_id: int, ledger_error_code: str) -> None:
+    """Suspend account and queue for human review when chained-ledger sync fails."""
+    user = db.get(User, user_id)
+    if not user:
+        return
+    user.account_blocked = True
+    user.fraud_review_pending = True
+    user.account_blocked_reason = (
+        f"Device ledger integrity check failed during sync ({ledger_error_code}). "
+        "Queued for manual agent review."
+    )
+    user.account_blocked_at = datetime.utcnow()
+    db.add(user)
 
 
 def _is_placeholder_signature(signature: str) -> bool:
@@ -286,7 +428,19 @@ def sync_offline_transactions(
                     "error_reason": error_reason
                 })
                 continue
-            
+
+            ledger_err = _verify_ledger_chain(tx_data, db, current_user.id)
+            if ledger_err:
+                _flag_user_for_ledger_fraud(db, current_user.id, ledger_err)
+                error_reason = ledger_err
+                results.append({
+                    "transaction_id": None,
+                    "reference": transaction_reference,
+                    "result": "failed",
+                    "error_reason": error_reason,
+                })
+                continue
+
             # Validation 5a: Sender has sufficient balance
             try:
                 current_balance = Decimal(str(sender_wallet.balance))
@@ -353,6 +507,16 @@ def sync_offline_transactions(
             db.flush()  # Flush to get the transaction ID
             
             transaction_id = offline_tx.id
+
+            if _ledger_payload_status(tx_data) == "full":
+                _persist_ledger_head(
+                    db,
+                    current_user.id,
+                    _device_fp_key(tx_data),
+                    str(tx_data.get("ledger_entry_hash")).strip(),
+                    int(tx_data.get("ledger_sequence")),
+                )
+                db.flush()
             
             # Update sender wallet balance (deduct amount)
             sender_wallet.balance = Decimal(str(sender_wallet.balance)) - amount

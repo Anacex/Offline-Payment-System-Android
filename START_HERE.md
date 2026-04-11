@@ -71,6 +71,7 @@ Welcome! This document is your **roadmap to understanding the entire project**. 
 | Document | Purpose | Audience | Time |
 |----------|---------|----------|------|
 | **[MOBILE_APP_GUIDE.md](MOBILE_APP_GUIDE.md)** | How to integrate mobile app with backend; JWT token handling; endpoints for mobile | Mobile/Frontend | 15 min |
+| **[Android-App/README.md](Android-App/README.md)** | Android BLE payment confirmation: QR vs BLE data channels, binary wire format, canonical signing, keystore eligibility | Mobile | 10 min |
 | **[OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md)** | Complete offline transaction workflow documentation; 5-step process; technical implementation details | Mobile/Frontend/Backend | 30 min |
 | **[QR_PAYLOAD_ANALYSIS.md](QR_PAYLOAD_ANALYSIS.md)** | QR code payload field analysis; current MVP fields; recommended production enhancements; security considerations | Mobile/Frontend/Backend | 15 min |
 

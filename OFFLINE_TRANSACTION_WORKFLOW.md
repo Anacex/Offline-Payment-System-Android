@@ -17,6 +17,65 @@ The system follows a **5-step workflow** that ensures:
 
 ---
 
+## Android app: Bluetooth (BLE) confirmation path
+
+The **Android** app can complete the same logical payment using a **Bluetooth Low Energy** link for acknowledgments instead of the payer manually tapping **“Sent”** after the payee scans the transaction QR.
+
+**Important — what goes over BLE vs QR**
+
+- **Transaction data** (`txId`, `payerId`, `payeeId`, `amount`, `timestamp`, `nonce`, names, notes, etc.) is carried **only** on the **transaction payload QR** (and in local app memory after scan/generate). It is **not** sent as plaintext in BLE packets.
+- Over **GATT**, the app sends **binary** frames containing only:
+  - **Receiver → sender:** receiver TEE **public key** (SPKI) + **timestamp** + **ECDSA signature** (signature covers a canonical string built locally from the QR payload + that timestamp).
+  - **Sender → receiver:** **timestamp** + **ECDSA signature** (covers a canonical string that includes `txId` from local QR context, not sent on the wire).
+- The **BLE connection** itself provides session liveness; if the link drops while a payment is in progress, the flow **aborts** and no new ledger row is committed for that attempt.
+
+**Persistence timing (differs from the “immediate save” description in Steps 3–4 below)**
+
+- On the **Bluetooth path**, **SENT** and **RECEIVED** rows are written **after** the full signed handshake succeeds, not merely when the transaction QR is shown or first scanned.
+- The **classic** flow (no BLE link) may still match the step-by-step text where saving happens on generate / scan without a separate ack channel.
+
+**Further detail:** see **[Android-App/README.md](Android-App/README.md)** (wire layout, canonical strings, eligibility, and source file map).
+
+---
+
+## Server sync: hash-chained ledger and fraud suspension
+
+When the Android app sends **ledger chain fields** with each offline sync row (`ledger_prev_hash`, `ledger_entry_hash`, `ledger_sequence`, `integrity_canonical_json`), the API:
+
+1. Recomputes **SHA-256** over `prev_hash + "|" + integrity_canonical_json` (UTF-8) and compares it to `ledger_entry_hash`.
+2. Checks **sequence** and **previous hash** against the stored tail in **`device_ledger_heads`** (per authenticated user and `device_fingerprint`), or the genesis hash for the first chained entry.
+3. On success, updates the tail so the next sync must continue the chain.
+
+If any check fails, the sync result for that row includes a **`LEDGER_INTEGRITY_*`** error code, and the server sets **`users.account_blocked`**, **`fraud_review_pending`**, and **`account_blocked_reason`**. The user then receives **HTTP 403** with `detail.code === "ACCOUNT_BLOCKED"` on login, token refresh, and other protected routes until an operator clears those columns manually (see `migrations/supabase_ledger_and_account_blocking.sql`).
+
+Legacy clients that omit ledger fields are not chain-verified on the server but still go through signature and balance checks.
+
+### Manual testing: account suspension and ledger tail
+
+There are two different ways to exercise suspension in a demo environment (Supabase or local Postgres/SQLite).
+
+**A — Fastest (UI / auth only): edit `users`**
+
+1. In Supabase **Table Editor** (or SQL), set for your demo account:
+   - `account_blocked` = `true`
+   - Optionally `fraud_review_pending` = `true` and `account_blocked_reason` = a note.
+2. In the Android app: try **login**, or stay logged in and trigger **`GET /auth/me`** (e.g. open the app so the session refreshes profile). You should get **HTTP 403** with `detail.code === "ACCOUNT_BLOCKED"` and the **Account under review** screen.
+3. This does **not** require a pending sync or ledger rows. It does **not** tamper with `device_ledger_heads`.
+
+**B — End-to-end ledger failure (server tail out of sync with the device)**
+
+This simulates “server expected chain ≠ honest client” (e.g. **`LEDGER_INTEGRITY_PREV_MISMATCH`** or **`LEDGER_INTEGRITY_SEQUENCE_MISMATCH`**), which then sets the same **`users`** suspension flags.
+
+1. Ensure you have at least one **pending** offline send that will sync with **full** ledger fields (`ledger_prev_hash`, `ledger_entry_hash`, `ledger_sequence`, `integrity_canonical_json`). If nothing is pending, changing the database alone will not run the ledger check.
+2. In Supabase, open **`device_ledger_heads`** for that user and matching **`device_fingerprint`** (empty string if the app sends no fingerprint).
+3. Change **`last_entry_hash`** to any other 64-hex value, or change **`last_sequence`** so it no longer matches the **next** row the app will send. The device still holds the real chain locally; the server’s stored tail is now wrong.
+4. Run **sync** from the app. The sync row should fail with a **`LEDGER_INTEGRITY_*`** reason, and the API sets **`account_blocked`** / **`fraud_review_pending`** on the user.
+5. **Cleanup:** restore the correct tail (or delete that `device_ledger_heads` row only if you know the next sync should restart from genesis — usually fix values or re-align with the device), and clear suspension on **`users`** using the example `UPDATE` in [`migrations/supabase_ledger_and_account_blocking.sql`](migrations/supabase_ledger_and_account_blocking.sql).
+
+**Note:** Editing `device_ledger_heads` does **not** break the hash chain **on the phone**; it makes the **server’s** expected previous hash/sequence disagree with the **client’s** next chained sync, which is what triggers the failure and block.
+
+---
+
 ## Step-by-Step Workflow
 
 ### **STEP 1: Payee Identifies Himself (Payee → Payer)**
