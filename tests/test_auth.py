@@ -1,6 +1,7 @@
 """Unit tests for authentication endpoints."""
-import pytest
 import uuid
+
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -253,6 +254,104 @@ def test_token_refresh_success(client: TestClient, test_user, db_session):
     body = response.json()
     assert "access_token" in body
     assert body["token_type"] == "bearer"
+
+
+@pytest.mark.unit
+def test_forgot_password_request_existing_user(client: TestClient, test_user):
+    """Registered email returns nonce for reset flow (otp_demo when DEBUG)."""
+    email = test_user["email"]
+    response = client.post("/auth/forgot-password", json={"email": email})
+    assert response.status_code == 200
+    body = response.json()
+    assert "msg" in body
+    assert body.get("nonce_demo")
+    if body.get("otp_demo"):
+        assert len(body["otp_demo"]) == 6
+
+
+@pytest.mark.unit
+def test_forgot_password_request_unknown_email(client: TestClient):
+    """Unknown email: generic message, no nonce (no enumeration)."""
+    response = client.post(
+        "/auth/forgot-password",
+        json={"email": f"nobody_{uuid.uuid4().hex[:8]}@example.com"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert "msg" in body
+    assert body.get("nonce_demo") is None
+
+
+@pytest.mark.unit
+def test_forgot_password_confirm_success(client: TestClient, test_user):
+    """After request, confirm with OTP updates password."""
+    email = test_user["email"]
+    req = client.post("/auth/forgot-password", json={"email": email})
+    assert req.status_code == 200
+    nonce = req.json()["nonce_demo"]
+    otp = req.json().get("otp_demo")
+    assert nonce and otp, "DEBUG must be true for otp_demo in tests"
+
+    new_pw = "N3wStr0ng!Pass"
+    confirm = client.post(
+        "/auth/forgot-password/confirm",
+        json={
+            "email": email,
+            "otp": otp,
+            "nonce": nonce,
+            "new_password": new_pw,
+            "confirm_password": new_pw,
+        },
+    )
+    assert confirm.status_code == 200
+    assert "password" in confirm.json().get("msg", "").lower() or "sign in" in confirm.json().get("msg", "").lower()
+
+    login = client.post(
+        "/auth/login",
+        json={
+            "email": email,
+            "password": new_pw,
+            "device_fingerprint": "device123",
+        },
+    )
+    assert login.status_code == 200
+
+
+@pytest.mark.unit
+def test_forgot_password_confirm_password_mismatch(client: TestClient, test_user):
+    req = client.post("/auth/forgot-password", json={"email": test_user["email"]})
+    nonce = req.json()["nonce_demo"]
+    otp = req.json().get("otp_demo")
+    response = client.post(
+        "/auth/forgot-password/confirm",
+        json={
+            "email": test_user["email"],
+            "otp": otp,
+            "nonce": nonce,
+            "new_password": "Str0ngN3w!Pass",
+            "confirm_password": "Different!Pass1",
+        },
+    )
+    assert response.status_code == 422
+    assert "match" in response.json().get("detail", "").lower()
+
+
+@pytest.mark.unit
+def test_forgot_password_confirm_weak_password(client: TestClient, test_user):
+    req = client.post("/auth/forgot-password", json={"email": test_user["email"]})
+    nonce = req.json()["nonce_demo"]
+    otp = req.json().get("otp_demo")
+    response = client.post(
+        "/auth/forgot-password/confirm",
+        json={
+            "email": test_user["email"],
+            "otp": otp,
+            "nonce": nonce,
+            "new_password": "weak",
+            "confirm_password": "weak",
+        },
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.unit

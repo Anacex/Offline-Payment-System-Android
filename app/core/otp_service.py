@@ -1,5 +1,5 @@
 """
-OTP challenges: Redis (REDIS_URL) when available, else PostgreSQL (OtpChallenge).
+OTP challenges: Redis when REDIS_ENABLED and REDIS_URL are set, else PostgreSQL (OtpChallenge).
 
 Codes are stored as SHA-256 hex of pepper||purpose||subject||nonce||code (constant-time compare).
 """
@@ -21,6 +21,7 @@ from app.models.otp_challenge import OtpChallenge
 
 PURPOSE_SIGNUP_VERIFY = "signup_verify"
 PURPOSE_LOGIN_UNVERIFIED = "login_unverified"
+PURPOSE_PASSWORD_RESET = "password_reset"
 PURPOSE_WALLET_CREATE = "wallet_create"
 PURPOSE_TOPUP = "topup"
 
@@ -39,6 +40,8 @@ def _hash_code(purpose: str, subject: str, nonce: str, code: str) -> str:
 
 
 def _redis():
+    if not settings.REDIS_ENABLED:
+        return None
     if not (settings.REDIS_URL or "").strip():
         return None
     try:

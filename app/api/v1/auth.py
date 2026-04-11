@@ -9,8 +9,10 @@ from app.core import security
 from app.core.config import settings
 from app.core.db import get_db
 from app.core.deps import get_current_user
+from app.core.validators import SecurityValidator
 from app.core.otp_service import (
     PURPOSE_LOGIN_UNVERIFIED,
+    PURPOSE_PASSWORD_RESET,
     PURPOSE_SIGNUP_VERIFY,
     create_challenge,
     log_otp_dev_only,
@@ -25,6 +27,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Import email service
 from app.core.email import send_email
 
+
+def _require_strong_password(password: str) -> None:
+    ok, _err = SecurityValidator.validate_password_strength(password)
+    if not ok:
+        raise HTTPException(status_code=422, detail="Password does not meet complexity rules")
+
+
 # Signup with strong password policy and email verification flow
 @router.post("/signup", status_code=201)
 def signup(payload: dict = Body(...), db: Session = Depends(get_db)):
@@ -38,10 +47,7 @@ def signup(payload: dict = Body(...), db: Session = Depends(get_db)):
     if not name or not email or not password:
         raise HTTPException(status_code=422, detail="name, email and password required")
 
-    # enforce strong password
-    import re
-    if len(password) < 10 or not re.search(r"[A-Z]", password) or not re.search(r"[a-z]", password) or not re.search(r"\d", password) or not re.search(r"[^\w\s]", password):
-        raise HTTPException(status_code=422, detail="Password does not meet complexity rules")
+    _require_strong_password(password)
 
     existing_user = db.query(User).filter(User.email == email).first()
     if existing_user:
@@ -283,6 +289,139 @@ def login_confirm(email: str = Body(...), otp: str = Body(...), nonce: str = Bod
     db.commit()
 
     return {"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token}
+
+
+@router.post("/forgot-password")
+def forgot_password_request(payload: dict = Body(...), db: Session = Depends(get_db)):
+    """Sends a one-time code to the user's email when the account exists."""
+    email = payload.get("email")
+    if not email or not str(email).strip():
+        raise HTTPException(status_code=422, detail="email is required")
+    subj = str(email).strip().lower()
+    user = db.query(User).filter(func.lower(User.email) == subj).first()
+    generic_msg = "If an account exists for this email, a password reset code has been sent."
+    if not user:
+        return {"msg": generic_msg, "nonce_demo": None, "otp_demo": None}
+
+    otp_code = secrets.randbelow(1000000)
+    otp = f"{otp_code:06d}"
+
+    email_body = f"""
+Hello {user.name},
+
+We received a request to reset your Offlink password. Use the code below:
+
+Your reset code: {otp}
+
+This code will expire in 10 minutes.
+
+If you didn't request a reset, you can ignore this email.
+"""
+
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background-color: #1E3A8A; color: white; padding: 20px; text-align: center;
+                       border-radius: 5px 5px 0 0; }}
+            .content {{ background-color: #f9f9f9; padding: 30px; border-radius: 0 0 5px 5px; }}
+            .otp-code {{ font-size: 32px; font-weight: bold; color: #1E3A8A; text-align: center;
+                        background-color: white; padding: 20px; margin: 20px 0;
+                        border-radius: 5px; letter-spacing: 5px; }}
+            .footer {{ text-align: center; margin-top: 20px; color: #666; font-size: 12px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Password reset</h1>
+            </div>
+            <div class="content">
+                <p>Hello <strong>{user.name}</strong>,</p>
+                <p>Use the code below to reset your password:</p>
+                <div class="otp-code">{otp}</div>
+                <p>This code expires in <strong>10 minutes</strong>.</p>
+                <p>If you didn't request this, you can ignore this email.</p>
+            </div>
+            <div class="footer">
+                <p>Offline Payment System</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    send_email(user.email, "Reset your Offlink password", email_body, html_body)
+
+    nonce = create_challenge(
+        db,
+        purpose=PURPOSE_PASSWORD_RESET,
+        subject=subj,
+        code=otp,
+        metadata={"user_id": user.id},
+    )
+    log_otp_dev_only(PURPOSE_PASSWORD_RESET, subj, otp)
+
+    return {
+        "msg": generic_msg,
+        "nonce_demo": nonce,
+        "otp_demo": otp if settings.DEBUG else None,
+    }
+
+
+@router.post("/forgot-password/confirm")
+def forgot_password_confirm(payload: dict = Body(...), db: Session = Depends(get_db)):
+    """Verify reset code and set a new password (same complexity rules as signup)."""
+    email = payload.get("email")
+    otp = payload.get("otp")
+    nonce = payload.get("nonce")
+    new_password = payload.get("new_password")
+    confirm_password = payload.get("confirm_password")
+    if not email or not otp or not nonce or not new_password or not confirm_password:
+        raise HTTPException(
+            status_code=422,
+            detail="email, otp, nonce, new_password, and confirm_password are required",
+        )
+    if new_password != confirm_password:
+        raise HTTPException(status_code=422, detail="Passwords do not match")
+
+    _require_strong_password(new_password)
+
+    subj = str(email).strip().lower()
+    ok, info = verify_by_nonce(db, nonce=str(nonce).strip(), code=str(otp).strip())
+    if not ok or not info:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code",
+        )
+    if info["purpose"] != PURPOSE_PASSWORD_RESET or info["subject"] != subj:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code",
+        )
+
+    user = db.query(User).filter(func.lower(User.email) == subj).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.password_hash = security.get_password_hash(new_password)
+    db.add(user)
+
+    for rt in (
+        db.query(RefreshToken)
+        .filter(RefreshToken.user_id == user.id, RefreshToken.revoked.is_(False))
+        .all()
+    ):
+        rt.revoked = True
+        db.add(rt)
+
+    db.commit()
+
+    return {"msg": "Password updated. Sign in with your new password."}
+
 
 # Refresh token endpoint
 @router.post("/token/refresh")

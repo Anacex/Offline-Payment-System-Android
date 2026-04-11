@@ -47,7 +47,7 @@ services:
         value: "true"
       - key: RATE_LIMIT_PER_MINUTE
         value: "30"
-      # Not read by the FastAPI settings model today; safe to omit in Render dashboard.
+      # false = OTP stored in Postgres only (no Redis on free web service).
       - key: REDIS_ENABLED
         value: "false"
       # Leave empty unless you provision Redis (Upstash, etc.). Localhost breaks on Render.

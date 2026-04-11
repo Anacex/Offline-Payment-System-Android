@@ -14,9 +14,13 @@ class Settings(BaseSettings):
         default="",
         description="Dedicated secret mixed into OTP hashes. If empty, falls back to SECRET_KEY-derived pepper.",
     )
+    REDIS_ENABLED: bool = Field(
+        default=True,
+        description="If false, OTP uses PostgreSQL only (ignores REDIS_URL). Use on hosts without Redis.",
+    )
     REDIS_URL: str = Field(
         default="",
-        description="If set, OTP challenges are stored in Redis; otherwise PostgreSQL (otp_challenges).",
+        description="If set and REDIS_ENABLED, OTP challenges are stored in Redis; else PostgreSQL (otp_challenges).",
     )
 
     PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON: str = Field(
