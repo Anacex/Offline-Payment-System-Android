@@ -52,7 +52,7 @@ DEBUG=true
 python -m app.db_init
 ```
 
-**Supabase / managed PostgreSQL:** On each API **startup**, `app/main.py` runs `Base.metadata.create_all()`, which **creates any missing tables** (for example `device_ledger_heads`) but does **not** add new **columns** to tables that already exist (for example new `users.*` suspension fields). For an existing Supabase project, run the idempotent script once in the SQL Editor: [`migrations/supabase_ledger_and_account_blocking.sql`](migrations/supabase_ledger_and_account_blocking.sql). Fresh installs can rely on startup + `python -m app.db_init` for a full schema.
+**Supabase / managed PostgreSQL:** On each API **startup**, `app/main.py` runs `Base.metadata.create_all()`, which **creates any missing tables** (for example `device_ledger_heads`, `offline_receiver_syncs`) but does **not** add new **columns** to tables that already exist (for example new `users.*` suspension fields). For an existing Supabase project, run these idempotent scripts once in the SQL Editor as needed: [`migrations/supabase_ledger_and_account_blocking.sql`](migrations/supabase_ledger_and_account_blocking.sql) (ledger heads + user suspension columns), and [`migrations/supabase_offline_receiver_syncs.sql`](migrations/supabase_offline_receiver_syncs.sql) (receiver-side audit table for `RECEIVED` sync rows). Fresh installs can rely on startup + `python -m app.db_init` for a full schema.
 
 4. Run the server:
 

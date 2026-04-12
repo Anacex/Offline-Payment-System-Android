@@ -6,7 +6,7 @@ from decimal import Decimal
 import json
 from app.core.crypto import CryptoManager
 from app.api.v1.offline_transaction import GENESIS_PREV_HASH, _ledger_entry_hash_hex
-from app.models.wallet import DeviceLedgerHead
+from app.models.wallet import DeviceLedgerHead, OfflineReceiverSync
 
 from tests.auth_helpers import get_auth_headers
 
@@ -25,6 +25,45 @@ def create_test_transaction_data(sender_wallet_id, receiver_public_key, amount, 
         "timestamp": datetime.utcnow().isoformat()
     }
     return transaction_data
+
+
+def create_receiver_sync_request(
+    receiver_wallet,
+    *,
+    amount="25.00",
+    payer_id="payer_1",
+    payee_id="99",
+    nonce=None,
+    tx_id=None,
+    device_fingerprint="receiver_sync_device",
+):
+    """Build a RECEIVED-direction sync row signed by the receiver's offline wallet (matches Android + API)."""
+    if nonce is None:
+        nonce = CryptoManager.generate_nonce()
+    if tx_id is None:
+        tx_id = CryptoManager.generate_nonce()
+    ts = datetime.utcnow().isoformat()
+    transaction_data = {
+        "direction": "RECEIVED",
+        "receiver_wallet_id": receiver_wallet.id,
+        "amount": str(amount),
+        "currency": "PKR",
+        "nonce": nonce,
+        "timestamp": ts,
+        "payer_id": payer_id,
+        "payee_id": payee_id,
+        "tx_id": tx_id,
+    }
+    signature = CryptoManager.sign_transaction(
+        transaction_data, receiver_wallet.private_key_encrypted
+    )
+    return {
+        "transaction_data": transaction_data,
+        "signature": signature,
+        "receipt": {"receipt_hash": "recv_rh_test"},
+        "device_fingerprint": device_fingerprint,
+        "txId": tx_id,
+    }
 
 
 def create_sync_transaction_request(transaction_data, signature, receipt=None):
@@ -628,3 +667,148 @@ def test_sync_ledger_success_updates_head(client: TestClient, test_user_with_wal
     assert head is not None
     assert head.last_sequence == 1
     assert head.last_entry_hash.lower() == entry.lower()
+
+
+@pytest.mark.unit
+def test_sync_receiver_success_audit_only_no_server_balance_change(
+    client: TestClient, test_user_with_wallets, db_session
+):
+    """Receiver RECEIVED sync is audit-only: wallet balances on server are unchanged."""
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    recv = test_user_with_wallets["offline_wallet"]
+    db_session.refresh(recv)
+    bal_before = Decimal(str(recv.balance))
+
+    sync_req = create_receiver_sync_request(recv)
+    response = client.post(
+        "/api/v1/offline-transactions/sync",
+        json={"transactions": [sync_req]},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_synced"] == 1
+    assert body["total_failed"] == 0
+    assert body["results"][0]["result"] == "synced"
+
+    db_session.refresh(recv)
+    assert Decimal(str(recv.balance)) == bal_before
+
+    row = (
+        db_session.query(OfflineReceiverSync)
+        .filter(OfflineReceiverSync.payment_nonce == sync_req["transaction_data"]["nonce"])
+        .first()
+    )
+    assert row is not None
+    assert row.receiver_wallet_id == recv.id
+
+
+@pytest.mark.unit
+def test_sync_receiver_duplicate_nonce_idempotent(
+    client: TestClient, test_user_with_wallets, db_session
+):
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    recv = test_user_with_wallets["offline_wallet"]
+    sync_req = create_receiver_sync_request(recv)
+    payload = {"transactions": [sync_req, sync_req]}
+    response = client.post(
+        "/api/v1/offline-transactions/sync", json=payload, headers=headers
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_synced"] == 2
+    assert body["total_failed"] == 0
+    for r in body["results"]:
+        assert r["result"] == "synced"
+
+
+@pytest.mark.unit
+def test_sync_receiver_signature_verification_fails(
+    client: TestClient, test_user_with_wallets
+):
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    recv = test_user_with_wallets["offline_wallet"]
+    sync_req = create_receiver_sync_request(recv)
+    sync_req["transaction_data"] = {
+        **sync_req["transaction_data"],
+        "amount": "999.00",
+    }
+    response = client.post(
+        "/api/v1/offline-transactions/sync",
+        json={"transactions": [sync_req]},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_failed"] == 1
+    assert "Signature verification failed" in body["results"][0]["error_reason"]
+
+
+@pytest.mark.unit
+def test_sync_receiver_ledger_success_updates_head(
+    client: TestClient, test_user_with_wallets, db_session
+):
+    fp = "receiver_ledger_fp"
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    recv = test_user_with_wallets["offline_wallet"]
+    sync_req = create_receiver_sync_request(recv, device_fingerprint=fp)
+    canon = '{"receiver_ledger":"ok"}'
+    entry = _ledger_entry_hash_hex(GENESIS_PREV_HASH, canon)
+    sync_req["ledger_prev_hash"] = GENESIS_PREV_HASH
+    sync_req["ledger_sequence"] = 1
+    sync_req["integrity_canonical_json"] = canon
+    sync_req["ledger_entry_hash"] = entry
+
+    response = client.post(
+        "/api/v1/offline-transactions/sync",
+        json={"transactions": [sync_req]},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_synced"] == 1
+
+    uid = test_user_with_wallets["user"].id
+    head = (
+        db_session.query(DeviceLedgerHead)
+        .filter(
+            DeviceLedgerHead.user_id == uid,
+            DeviceLedgerHead.device_fingerprint == fp,
+        )
+        .first()
+    )
+    assert head is not None
+    assert head.last_sequence == 1
+    assert head.last_entry_hash.lower() == entry.lower()
+
+
+@pytest.mark.unit
+def test_sync_receiver_ledger_failure_flags_user_blocked(
+    client: TestClient, test_user_with_wallets, db_session
+):
+    from app.models.user import User
+
+    fp = "receiver_ledger_bad"
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    recv = test_user_with_wallets["offline_wallet"]
+    sync_req = create_receiver_sync_request(recv, device_fingerprint=fp)
+    canon = '{"receiver_ledger":"tampered"}'
+    sync_req["ledger_prev_hash"] = GENESIS_PREV_HASH
+    sync_req["ledger_sequence"] = 1
+    sync_req["integrity_canonical_json"] = canon
+    sync_req["ledger_entry_hash"] = "f" * 64
+
+    response = client.post(
+        "/api/v1/offline-transactions/sync",
+        json={"transactions": [sync_req]},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_failed"] == 1
+
+    uid = test_user_with_wallets["user"].id
+    db_session.expire_all()
+    user = db_session.query(User).filter(User.id == uid).first()
+    assert user.account_blocked is True
+    assert user.fraud_review_pending is True

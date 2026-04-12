@@ -15,7 +15,7 @@ from app.core.db import get_db
 from app.core.auth import get_current_user
 from app.core.crypto import CryptoManager
 from app.models.user import User
-from app.models.wallet import Wallet, OfflineTransaction, DeviceLedgerHead
+from app.models.wallet import Wallet, OfflineTransaction, OfflineReceiverSync, DeviceLedgerHead
 from app.schemas.wallet import (
     OfflineTransactionCreate, OfflineTransactionRead,
     OfflineTransactionSync, ReceiptVerification
@@ -151,6 +151,211 @@ def _persist_ledger_head(db: Session, user_id: int, device_fp: str, entry_hash: 
     else:
         row.last_entry_hash = entry_hash
         row.last_sequence = sequence
+
+
+def _sync_one_receiver_row(
+    tx_data: dict,
+    current_user: User,
+    db: Session,
+    results: list,
+) -> None:
+    """
+    Receiver attestation: RSA signature + hash chain. Does not change wallet balances
+    (sender sync is authoritative for balances).
+    """
+    transaction_data = tx_data.get("transaction_data", {})
+    signature = (tx_data.get("signature") or "").strip()
+    receipt = tx_data.get("receipt") or {}
+    if not isinstance(receipt, dict):
+        receipt = {}
+    transaction_reference = transaction_data.get("nonce") or tx_data.get("txId") or tx_data.get("transaction_id")
+
+    required_fields = [
+        "receiver_wallet_id",
+        "amount",
+        "currency",
+        "nonce",
+        "timestamp",
+        "payer_id",
+        "payee_id",
+        "tx_id",
+    ]
+    missing = [f for f in required_fields if transaction_data.get(f) in (None, "")]
+    if missing:
+        results.append(
+            {
+                "transaction_id": None,
+                "reference": transaction_reference,
+                "result": "failed",
+                "error_reason": f"Missing required fields: {', '.join(missing)}",
+            }
+        )
+        return
+
+    nonce = str(transaction_data.get("nonce")).strip()
+    existing = (
+        db.query(OfflineReceiverSync)
+        .filter(
+            OfflineReceiverSync.user_id == current_user.id,
+            OfflineReceiverSync.payment_nonce == nonce,
+        )
+        .first()
+    )
+    if existing:
+        results.append(
+            {
+                "transaction_id": existing.id,
+                "reference": transaction_reference,
+                "result": "synced",
+                "error_reason": None,
+            }
+        )
+        return
+
+    if _is_placeholder_signature(signature):
+        results.append(
+            {
+                "transaction_id": None,
+                "reference": transaction_reference,
+                "result": "failed",
+                "error_reason": "Invalid or missing transaction signature",
+            }
+        )
+        return
+
+    try:
+        rwid = int(transaction_data["receiver_wallet_id"])
+    except (TypeError, ValueError):
+        results.append(
+            {
+                "transaction_id": None,
+                "reference": transaction_reference,
+                "result": "failed",
+                "error_reason": "Invalid receiver_wallet_id",
+            }
+        )
+        return
+
+    recv_wallet = (
+        db.query(Wallet)
+        .filter(
+            Wallet.id == rwid,
+            Wallet.user_id == current_user.id,
+            Wallet.wallet_type == "offline",
+        )
+        .first()
+    )
+    if not recv_wallet or not recv_wallet.public_key:
+        results.append(
+            {
+                "transaction_id": None,
+                "reference": transaction_reference,
+                "result": "failed",
+                "error_reason": "Receiver wallet not found or has no public key",
+            }
+        )
+        return
+
+    tx_for_verify = {
+        "amount": str(transaction_data["amount"]),
+        "currency": str(transaction_data["currency"]),
+        "direction": "RECEIVED",
+        "nonce": str(transaction_data["nonce"]),
+        "payee_id": str(transaction_data["payee_id"]),
+        "payer_id": str(transaction_data["payer_id"]),
+        "receiver_wallet_id": rwid,
+        "timestamp": str(transaction_data["timestamp"]),
+        "tx_id": str(transaction_data["tx_id"]),
+    }
+    if not CryptoManager.verify_signature(tx_for_verify, signature, recv_wallet.public_key):
+        results.append(
+            {
+                "transaction_id": None,
+                "reference": transaction_reference,
+                "result": "failed",
+                "error_reason": "Signature verification failed",
+            }
+        )
+        return
+
+    ledger_err = _verify_ledger_chain(tx_data, db, current_user.id)
+    if ledger_err:
+        _flag_user_for_ledger_fraud(db, current_user.id, ledger_err)
+        results.append(
+            {
+                "transaction_id": None,
+                "reference": transaction_reference,
+                "result": "failed",
+                "error_reason": ledger_err,
+            }
+        )
+        return
+
+    try:
+        amount = Decimal(str(transaction_data["amount"]))
+        if amount <= 0:
+            results.append(
+                {
+                    "transaction_id": None,
+                    "reference": transaction_reference,
+                    "result": "failed",
+                    "error_reason": "Amount must be greater than 0",
+                }
+            )
+            return
+    except (InvalidOperation, ValueError, TypeError):
+        results.append(
+            {
+                "transaction_id": None,
+                "reference": transaction_reference,
+                "result": "failed",
+                "error_reason": "Invalid amount format",
+            }
+        )
+        return
+
+    ts_raw = str(transaction_data.get("timestamp", "")).strip()
+    try:
+        created_dev = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+    except ValueError:
+        created_dev = datetime.utcnow()
+
+    row = OfflineReceiverSync(
+        user_id=current_user.id,
+        receiver_wallet_id=rwid,
+        amount=amount,
+        currency=str(transaction_data["currency"]),
+        payment_nonce=nonce,
+        tx_id=str(transaction_data["tx_id"]).strip(),
+        payer_id=str(transaction_data["payer_id"]).strip(),
+        payee_id=str(transaction_data["payee_id"]).strip(),
+        transaction_signature=signature,
+        receipt_hash=str(receipt.get("receipt_hash", "") or ""),
+        receipt_data=json.dumps(receipt) if receipt else "{}",
+        device_fingerprint=tx_data.get("device_fingerprint"),
+        created_at_device=created_dev,
+    )
+    db.add(row)
+    db.flush()
+
+    if _ledger_payload_status(tx_data) == "full":
+        _persist_ledger_head(
+            db,
+            current_user.id,
+            _device_fp_key(tx_data),
+            str(tx_data.get("ledger_entry_hash")).strip(),
+            int(tx_data.get("ledger_sequence")),
+        )
+        db.flush()
+
+    results.append(
+        {
+            "transaction_id": row.id,
+            "reference": transaction_reference,
+            "result": "synced",
+            "error_reason": None,
+        }
+    )
 
 
 def _flag_user_for_ledger_fraud(db: Session, user_id: int, ledger_error_code: str) -> None:
@@ -340,7 +545,12 @@ def sync_offline_transactions(
             transaction_data = tx_data.get("transaction_data", {})
             signature = (tx_data.get("signature") or "").strip()
             receipt = tx_data.get("receipt", {})
-            
+
+            direction = str(transaction_data.get("direction") or "").strip().upper()
+            if direction == "RECEIVED":
+                _sync_one_receiver_row(tx_data, current_user, db, results)
+                continue
+
             # Get transaction reference (nonce or txId)
             transaction_reference = transaction_data.get("nonce") or tx_data.get("txId") or tx_data.get("transaction_id")
             

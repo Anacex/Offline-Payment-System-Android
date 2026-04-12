@@ -76,6 +76,40 @@ class OfflineTransaction(Base):
         return f"<OfflineTransaction(id={self.id}, amount={self.amount}, status={self.status})>"
 
 
+class OfflineReceiverSync(Base):
+    """
+    Receiver-side audit of an offline credit (same payment nonce as sender's payload).
+    Does not move balances: the sender's sync is authoritative for wallet balances.
+    Used for compliance, dispute resolution, and extending the receiver's device hash chain on the server.
+    """
+
+    __tablename__ = "offline_receiver_syncs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "payment_nonce", name="uq_offline_recv_user_nonce"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    receiver_wallet_id = Column(Integer, ForeignKey("wallets.id", ondelete="RESTRICT"), nullable=False, index=True)
+    amount = Column(Numeric(12, 2), nullable=False)
+    currency = Column(String(3), nullable=False, default="PKR")
+    payment_nonce = Column(String(64), nullable=False, index=True)
+    tx_id = Column(String(64), nullable=False, index=True)
+    payer_id = Column(String(64), nullable=False)
+    payee_id = Column(String(64), nullable=False)
+    transaction_signature = Column(Text, nullable=False)
+    receipt_hash = Column(String(128), nullable=False, default="", server_default="")
+    receipt_data = Column(Text, nullable=False, default="{}", server_default="{}")
+    device_fingerprint = Column(String(128), nullable=True)
+    created_at_device = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    receiver_wallet = relationship("Wallet", foreign_keys=[receiver_wallet_id])
+
+    def __repr__(self):
+        return f"<OfflineReceiverSync(id={self.id}, user_id={self.user_id}, nonce={self.payment_nonce})>"
+
+
 class DeviceLedgerHead(Base):
     """
     Per-user, per-device tail of the offline hash chain. Used at sync to detect

@@ -50,6 +50,26 @@ If any check fails, the sync result for that row includes a **`LEDGER_INTEGRITY_
 
 Legacy clients that omit ledger fields are not chain-verified on the server but still go through signature and balance checks.
 
+### Receiver-side sync (`direction: RECEIVED`) — same local security, audit-only on server
+
+The **payee’s** device is intended to match the **payer’s** local protections:
+
+- **Encryption at rest** for sensitive columns where applicable (`OfflineLedgerChain.encryptAtRest` + AES-GCM).
+- **`receipt_hash`**: SHA-256 (hex) over the **raw** transaction JSON (same idea as the sender row).
+- **Nested receipt**: inner ciphertext binds a **TEE signature** over the raw payload (`tee_payload_sig_b64` + `payload_cipher`), then outer encryption—see `BleHandshake.persistReceiverLedger` / `persistSenderLedger`.
+- **Hash chain**: `ledger_prev_hash`, `ledger_entry_hash`, `ledger_sequence`, and `integrity_canonical_json` are computed the same way as for **SENT** rows; the server updates **`device_ledger_heads`** per user and **`device_fingerprint`** when the full chain is present.
+- **RSA-PSS-SHA256** (wallet key): the receiver signs the same canonical **`transaction_data`** map the API verifies (including **`direction: RECEIVED`**, **`receiver_wallet_id`**, **`payer_id`**, **`payee_id`**, **`tx_id`**, **`nonce`**, **`amount`**, **`currency`**, **`timestamp`**).
+
+On **`POST /api/v1/offline-transactions/sync`**, when `transaction_data.direction === "RECEIVED"`, the backend writes **`offline_receiver_syncs`** (see [`migrations/supabase_offline_receiver_syncs.sql`](migrations/supabase_offline_receiver_syncs.sql)). That row is for **compliance / disputes / device-chain continuity** only: it does **not** increase the receiver’s server wallet balance. **Balance movement** still comes from the **sender’s** sync path (`OfflineTransaction`), so the same payment cannot “credit” twice from two independent sync attestations.
+
+### Sync over the network: TLS vs “encrypted JSON”
+
+- **In transit:** The mobile app uses **HTTPS**. **TLS encrypts the whole request**, including the JSON body. The question “decrypted or encrypted JSON?” usually means: *does the application layer wrap fields in another cipher inside TLS?*
+- **This project:** The sync body includes **`transaction_data` as plain structured JSON** so the server can verify **RSA-PSS** signatures, enforce rules, and persist rows. That matches common **retail / mobile banking** practice: **TLS (and often certificate pinning)** for transport, plus **authentication, authorization, rate limits, monitoring, and fraud workflows** on the server—not an extra application-layer encryption of the same fields the API must parse on every sync.
+- **What stays “double protected”:** Sensitive material is **encrypted on the device** before Room storage; **`integrity_canonical_json`** includes those **ciphertext** values so any local tampering breaks the **hash chain** when syncing.
+
+End-to-end application encryption (e.g. a blob encrypted to the bank’s public key) is an additional architecture you might add for specific compliance targets; it is **not** required for the baseline threat model “TLS + signed, auditable `transaction_data` + tamper-evident device ledger.”
+
 ### Manual testing: account suspension and ledger tail
 
 There are two different ways to exercise suspension in a demo environment (Supabase or local Postgres/SQLite).
@@ -258,10 +278,11 @@ data class LocalTransaction(
      - **Critical**: Prevents accepting payments intended for someone else
 
 3. **If Validation Passes**:
-   - Transaction is immediately saved to local Room database
-   - Direction: `"RECEIVED"`
-   - Full payload stored in `rawPayload` field
-   - App navigates to "Payment Received (Offline)" screen
+   - **Bluetooth path:** After a full signed BLE handshake, `BleHandshake.persistReceiverLedger` writes the **RECEIVED** row (RSA sync signature, encrypted receipt, hash chain). The UI then proceeds as “received.”
+   - **Without a completed BLE receive flow**, the app does not treat the payment as recorded (see Android receive flow).
+   - Direction: `"RECEIVED"` on success
+   - Full payload is reflected in `rawPayload` / chain fields as implemented in `WalletRepository.saveLocalTransaction` + `OfflineLedgerChain`
+   - App navigates to "Payment Received (Offline)" screen when the flow completes successfully
 
 4. **If Validation Fails**:
    - Error message is displayed
