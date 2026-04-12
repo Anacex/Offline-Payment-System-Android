@@ -69,7 +69,7 @@ Summary of important edits that brought the unit suite from many failures/errors
 - Overrode `app.dependency_overrides[get_db]` in tests to force the app to use the test session.
 - Fixed code / test mismatches:
   - Switched Pydantic usage to `.dict()` where `.model_dict()` was used incorrectly.
-  - Included the `/sync` router in `app/main.py` so sync-related tests can exercise those routes.
+  - Offline sync is exercised via **`POST /api/v1/offline-transactions/sync`** (see `tests/test_sync.py`, `tests/test_offline_transactions.py`). The legacy root **`POST /sync`** router and **`/api/v1/transactions`** CRUD have been removed.
   - Relaxed router-level authentication in offline transaction endpoints where verification should be public.
   - Normalised amount serialization (format amounts with two decimal places in offline transaction creation) so tests and API agree on formatting.
   - Adjusted test expectations (status codes and seeded balances) to reflect the app's intended behaviour.

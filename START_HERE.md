@@ -180,9 +180,7 @@ Offline-Payment-System-Android/
 │   │       ├── auth.py               # Authentication endpoints
 │   │       ├── user.py               # User endpoints
 │   │       ├── wallet.py             # Wallet endpoints
-│   │       ├── transaction.py        # Transaction endpoints
-│   │       ├── offline_transaction.py # Offline tx endpoints
-│   │       ├── sync.py               # Sync endpoints
+│   │       ├── offline_transaction.py # Offline tx (sync, unified-history, confirm, …)
 │   │       └── health.py             # Health check endpoint
 │   └── core/                         # Core utilities
 │       ├── config.py                 # Configuration & environment
@@ -197,8 +195,8 @@ Offline-Payment-System-Android/
 │   ├── test_health.py                # Health endpoint tests
 │   ├── test_users.py                 # User endpoint tests
 │   ├── test_wallets.py               # Wallet endpoint tests
-│   ├── test_transactions.py          # Transaction endpoint tests
-│   └── test_offline_transactions.py  # Offline transaction tests
+│   ├── test_sync.py                  # Offline sync & ledger tests (uses /offline-transactions/sync)
+│   └── test_offline_transactions.py  # Offline transaction API tests
 ├── docs/                             # Documentation files (this folder)
 │   ├── README.md                     # Main README (project overview)
 │   ├── START_HERE.md                 # This file (you are here)

@@ -6,7 +6,9 @@ The Offline Payment System API enables secure offline money transfers using asym
 
 **Base URL**: `http://localhost:8000` (development)  
 **API Version**: 1.0.0  
-**Authentication**: Bearer JWT tokens
+**Authentication**: Bearer JWT tokens  
+
+**Legacy removal:** `GET/POST /api/v1/transactions/` and `POST /sync` (application root) are **not** part of this API anymore. Use **wallets**, **wallet_transfers**, and **offline-transactions** instead.
 
 ---
 
@@ -675,7 +677,8 @@ Authorization: Bearer {access_token}
 
 Sync offline transactions from mobile to server (when online).
 
-**Endpoint**: `POST /api/v1/offline-transactions/sync`
+**Endpoint**: `POST /api/v1/offline-transactions/sync`  
+**Alias**: `POST /api/v1/offline-transactions/offline-sync` (same request body and behavior)
 
 **Headers**:
 ```
@@ -818,7 +821,46 @@ Authorization: Bearer {access_token}
 
 ---
 
-### 6. Confirm Offline Transaction
+### 6. Unified Offline History
+
+Merged history for the authenticated user: **sent** rows (`offline_transactions` where the user owns the sender wallet) and **received** rows (`offline_receiver_syncs`). Same payment **nonce** ties both sides. Includes `sync_coverage` (`sender_only` | `receiver_only` | `both`), `first_sync_party` (`sender` | `receiver`), and optional link timestamps when both sides exist.
+
+**Endpoint**: `GET /api/v1/offline-transactions/unified-history?limit=10`
+
+**Headers**:
+```
+Authorization: Bearer {access_token}
+```
+
+**Query Parameters**:
+- `limit` (optional): 1–50, default **10**
+
+**Response** (200): JSON array of objects, for example:
+```json
+[
+  {
+    "nonce": "abc123…",
+    "tx_id": "uuid-from-payload",
+    "amount": "50.00",
+    "currency": "PKR",
+    "perspective": "sent",
+    "payer_id": "1",
+    "payee_id": "2",
+    "offline_transaction_id": 12,
+    "receiver_sync_id": 3,
+    "sender_synced_at_server": "2026-04-12T10:00:00",
+    "receiver_synced_at_server": "2026-04-12T10:05:00",
+    "first_sync_party": "sender",
+    "sync_coverage": "both",
+    "receiver_attestation_at": "2026-04-12T10:05:00",
+    "sender_settlement_recorded_at": "2026-04-12T10:00:00"
+  }
+]
+```
+
+---
+
+### 7. Confirm Offline Transaction
 
 Confirm transaction and transfer to receiver's current account.
 

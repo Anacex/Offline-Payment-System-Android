@@ -268,7 +268,7 @@ The Offline Payment System backend is built using **FastAPI** (Python) and **Pos
   ```
 
 #### 3. Sync Offline Transactions
-- **Endpoint**: `POST /api/v1/offline-transactions/sync`
+- **Endpoint**: `POST /api/v1/offline-transactions/sync` (alias: `POST /api/v1/offline-transactions/offline-sync`)
 - **Description**: Sync offline transactions from mobile to server
 - **Headers**: `Authorization: Bearer {access_token}`
 - **Request Body**: Array of transaction objects with signatures and receipts
@@ -280,11 +280,17 @@ The Offline Payment System backend is built using **FastAPI** (Python) and **Pos
 
 #### 5. List Offline Transactions
 - **Endpoint**: `GET /api/v1/offline-transactions/`
-- **Description**: List offline transactions for authenticated user
+- **Description**: List **sender-settled** offline rows (`offline_transactions`) for the authenticated user’s offline wallets only (not payee-side attestations).
 - **Headers**: `Authorization: Bearer {access_token}`
 - **Query Parameters**: `status_filter` (optional), `limit` (optional, default: 50)
 
-#### 6. Confirm Offline Transaction
+#### 6. Unified Offline History
+- **Endpoint**: `GET /api/v1/offline-transactions/unified-history`
+- **Description**: Last *N* (default 10, max 50) offline payments involving the user, merging **sent** (`offline_transactions`) and **received** (`offline_receiver_syncs`) by shared nonce; includes `first_sync_party`, `sync_coverage`, and link timestamps when both sides exist.
+- **Headers**: `Authorization: Bearer {access_token}`
+- **Query Parameters**: `limit` (optional)
+
+#### 7. Confirm Offline Transaction
 - **Endpoint**: `POST /api/v1/offline-transactions/{transaction_id}/confirm`
 - **Description**: Confirm and finalize offline transaction
 - **Headers**: `Authorization: Bearer {access_token}`
@@ -307,20 +313,6 @@ The Offline Payment System backend is built using **FastAPI** (Python) and **Pos
 
 ---
 
-### Transaction Endpoints
-
-#### 1. List Transactions
-- **Endpoint**: `GET /api/v1/transactions/`
-- **Description**: List all transactions
-- **Headers**: `Authorization: Bearer {access_token}`
-
-#### 2. Create Transaction
-- **Endpoint**: `POST /api/v1/transactions/`
-- **Description**: Create new transaction
-- **Headers**: `Authorization: Bearer {access_token}`
-
----
-
 ### Health Check
 
 #### 1. Health Check
@@ -339,9 +331,13 @@ The system uses **PostgreSQL** with the following tables:
 1. **users** - User accounts and authentication
 2. **wallets** - Wallet information and cryptographic keys
 3. **wallet_transfers** - Transfer history between wallets
-4. **offline_transactions** - Offline transaction records
-5. **transactions** - General transaction records
-6. **refresh_tokens** - JWT refresh token storage
+4. **offline_transactions** - Sender-side offline settlement (synced from payer device)
+5. **offline_receiver_syncs** - Receiver-side attestation / audit (same payment nonce; not authoritative for balances)
+6. **device_ledger_heads** - Per-user per-device hash-chain tail verified at sync
+7. **otp_challenges** - OTP flows (wallet creation, top-up, etc.)
+8. **refresh_tokens** - JWT refresh token storage
+
+The legacy **`transactions`** table (user-to-user demo) has been **removed** from the app and should be dropped in Supabase via [`migrations/supabase_offline_sync_link_timestamps.sql`](migrations/supabase_offline_sync_link_timestamps.sql).
 
 ---
 
@@ -495,38 +491,7 @@ CREATE INDEX idx_offline_transactions_nonce ON offline_transactions(nonce);
 - `device_fingerprint`: Device identifier
 - `created_at`: Server record creation timestamp
 - `updated_at`: Last update timestamp
-
----
-
-### Transactions Table
-
-```sql
-CREATE TABLE transactions (
-    id SERIAL PRIMARY KEY,
-    sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    amount NUMERIC(12, 2) NOT NULL,
-    currency VARCHAR(3) DEFAULT 'PKR' NOT NULL,
-    status VARCHAR(20) DEFAULT 'pending' NOT NULL,
-    reference VARCHAR(64) UNIQUE NOT NULL,
-    timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
-);
-
-CREATE INDEX idx_transactions_sender_id ON transactions(sender_id);
-CREATE INDEX idx_transactions_receiver_id ON transactions(receiver_id);
-CREATE INDEX idx_transactions_reference ON transactions(reference);
-CREATE INDEX ix_transactions_sender_receiver_time ON transactions(sender_id, receiver_id, timestamp);
-```
-
-**Fields**:
-- `id`: Primary key
-- `sender_id`: Sender's user ID
-- `receiver_id`: Receiver's user ID
-- `amount`: Transaction amount
-- `currency`: Currency code
-- `status`: Transaction status
-- `reference`: Unique transaction reference
-- `timestamp`: Transaction timestamp
+- `receiver_attestation_at` (optional column, see migrations): set when a matching receiver sync is accepted for the same nonce
 
 ---
 
@@ -566,8 +531,8 @@ The system currently uses **SQLAlchemy's automatic table creation** via `Base.me
 
 ### Migration Files Location
 
-- **Directory**: `migrations/` (currently empty)
-- **Future**: Will use Alembic for version-controlled migrations
+- **Directory**: `migrations/` — SQL scripts for Supabase / Postgres (ledger blocking, receiver syncs, link timestamps, etc.); see [`migrations/README_MIGRATION.md`](migrations/README_MIGRATION.md)
+- **Future**: May add Alembic for version-controlled migrations
 
 ### Current Migration Approach
 
@@ -577,13 +542,15 @@ The system currently uses **SQLAlchemy's automatic table creation** via `Base.me
 - Uses SQLAlchemy `Base.metadata.create_all()`
 - Checks if tables exist before creating (`checkfirst=True`)
 
-**Tables Created Automatically**:
+**Tables Created Automatically** (SQLAlchemy models):
 1. `users`
 2. `wallets`
 3. `wallet_transfers`
 4. `offline_transactions`
-5. `transactions`
-6. `refresh_tokens`
+5. `offline_receiver_syncs`
+6. `device_ledger_heads`
+7. `otp_challenges`
+8. `refresh_tokens`
 
 ### Manual Database Initialization
 

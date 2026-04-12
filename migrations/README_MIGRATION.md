@@ -1,8 +1,18 @@
-# Database Migration: Update Schema Constraints
+# Database migrations (Supabase / Postgres)
 
-**Also see:** [`supabase_ledger_and_account_blocking.sql`](supabase_ledger_and_account_blocking.sql) — `device_ledger_heads` table and `users` suspension / fraud-review columns (ledger tamper response).
+**Primary one-shot cleanup + sync link columns:** [`supabase_offline_sync_link_timestamps.sql`](supabase_offline_sync_link_timestamps.sql) — adds `receiver_attestation_at` / `sender_settlement_recorded_at`, receiver sync indexes + unique `(user_id, payment_nonce)`, device ledger unique index, and **drops deprecated `public.transactions`**.
 
-## What This Migration Does
+**Also see:**
+- [`supabase_ledger_and_account_blocking.sql`](supabase_ledger_and_account_blocking.sql) — `device_ledger_heads` and `users` suspension / fraud-review columns  
+- [`supabase_offline_receiver_syncs.sql`](supabase_offline_receiver_syncs.sql) — `offline_receiver_syncs` table  
+
+---
+
+# Older script: `001_update_schema_constraints.sql`
+
+> **If you already ran `supabase_offline_sync_link_timestamps.sql`**, the `public.transactions` table may be **gone**. Skip or comment out the **`transactions`** section inside `001_update_schema_constraints.sql` when applying it, or the script will error.
+
+## What `001_update_schema_constraints` Does
 
 This migration adds missing constraints and indexes to align your Supabase database with the SQLAlchemy model definitions.
 
@@ -17,10 +27,8 @@ This migration adds missing constraints and indexes to align your Supabase datab
    - ✅ Adds index on `token` for faster lookups
    - ✅ Updates foreign key to `CASCADE` on delete (matches model)
 
-3. **transactions**:
-   - ✅ Adds `UNIQUE` constraint on `reference` column
-   - ✅ Adds index on `reference` for faster lookups
-   - ✅ Adds composite index on `(sender_id, receiver_id, timestamp)` for query optimization
+3. **transactions** (legacy — **table removed** by `supabase_offline_sync_link_timestamps.sql`; skip this block if the table does not exist):
+   - Adds `UNIQUE` on `reference`, indexes (historical only)
 
 4. **users**:
    - ✅ Adds `UNIQUE` constraint on `email` column (if not already exists)

@@ -52,7 +52,7 @@ DEBUG=true
 python -m app.db_init
 ```
 
-**Supabase / managed PostgreSQL:** On each API **startup**, `app/main.py` runs `Base.metadata.create_all()`, which **creates any missing tables** (for example `device_ledger_heads`, `offline_receiver_syncs`) but does **not** add new **columns** to tables that already exist (for example new `users.*` suspension fields). For an existing Supabase project, run these idempotent scripts once in the SQL Editor as needed: [`migrations/supabase_ledger_and_account_blocking.sql`](migrations/supabase_ledger_and_account_blocking.sql) (ledger heads + user suspension columns), and [`migrations/supabase_offline_receiver_syncs.sql`](migrations/supabase_offline_receiver_syncs.sql) (receiver-side audit table for `RECEIVED` sync rows). Fresh installs can rely on startup + `python -m app.db_init` for a full schema.
+**Supabase / managed PostgreSQL:** On each API **startup**, `app/main.py` runs `Base.metadata.create_all()`, which **creates any missing tables** (for example `device_ledger_heads`, `offline_receiver_syncs`) but does **not** add new **columns** to tables that already exist (for example new `users.*` suspension fields). For an existing Supabase project, run these idempotent scripts once in the SQL Editor as needed: [`migrations/supabase_ledger_and_account_blocking.sql`](migrations/supabase_ledger_and_account_blocking.sql) (ledger heads + user suspension columns), [`migrations/supabase_offline_receiver_syncs.sql`](migrations/supabase_offline_receiver_syncs.sql) (receiver-side audit table for `RECEIVED` sync rows), and [`migrations/supabase_offline_sync_link_timestamps.sql`](migrations/supabase_offline_sync_link_timestamps.sql) (sync link columns, constraints, cleanup of deprecated `public.transactions`). Fresh installs can rely on startup + `python -m app.db_init` for a full schema.
 
 4. Run the server:
 
@@ -77,25 +77,9 @@ Contributing
 
 Need help?
 
-Open an issue describing the problem or ask in the team chat and point to the failing test/logs. If you want, I can also move old/archived docs into an `archive_docs/` folder instead of deleting them.
+Open an issue describing the problem or ask in the team chat and point to the failing test/logs.
 
----
-
-If this looks good I will delete the old archived docs to remove clutter (you asked for removal). If you'd prefer moving them to `archive_docs/` instead, tell me and I'll do that instead.
-│   │   ├── transaction.py              # Transaction model
-│   │   └── base.py                     # Base model
-│   ├── schemas/
-│   │   ├── auth.py                     # Auth schemas
-│   │   ├── wallet.py                   # Wallet schemas
-│   │   ├── transaction.py              # Transaction schemas
-│   │   └── user.py                     # User schemas
-│   ├── db_init.py                      # Database initialization
-│   └── main.py                         # FastAPI application
-├── API_DOCUMENTATION.md                # Complete API docs
-├── THREAT_MODEL.md                     # Security analysis
-├── requirements.txt                    # Python dependencies
-└── README.md                           # This file
-```
+**Supabase schema upgrades (existing projects):** also run [`migrations/supabase_offline_sync_link_timestamps.sql`](migrations/supabase_offline_sync_link_timestamps.sql) once (link columns, indexes, drops deprecated `public.transactions`). See `migrations/README_MIGRATION.md`.
 
 ## 🔧 API Endpoints
 
@@ -124,16 +108,16 @@ If this looks good I will delete the old archived docs to remove clutter (you as
 **Offline Transactions**:
 - `POST /api/v1/offline-transactions/create-local` - Create transaction
 - `POST /api/v1/offline-transactions/sign-and-store` - Sign & store
-- `POST /api/v1/offline-transactions/sync` - Sync to server
-- `GET /api/v1/offline-transactions/` - List transactions
+- `POST /api/v1/offline-transactions/sync` - Sync to server (batch from mobile)
+- `POST /api/v1/offline-transactions/offline-sync` - Alias of `/sync` (same body)
+- `GET /api/v1/offline-transactions/` - List sender-settled rows for the current user’s offline wallets
+- `GET /api/v1/offline-transactions/unified-history` - Last *N* payments involving the user (sent + received, merge metadata)
 - `POST /api/v1/offline-transactions/{id}/confirm` - Confirm transaction
 
 **Users**:
 - `GET /api/v1/users/` - List users
 
-**Transactions**:
-- `GET /api/v1/transactions/` - List transactions
-- `POST /api/v1/transactions/` - Create transaction
+**Removed (legacy demo):** `GET/POST /api/v1/transactions/` and `POST /sync` (root) — replaced by wallet + offline-transaction flows above.
 
 ## ✨ Current product features (high level)
 

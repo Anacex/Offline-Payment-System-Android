@@ -428,6 +428,8 @@ The API persists offline payments in **two** Postgres tables (same DB as `DATABA
 
 **Supabase “empty” while the app says synced:** Ensure production `DATABASE_URL` points at that Supabase instance (not Render’s internal Postgres). Receiver-only activity never appears in `offline_transactions` until the payer syncs—check `offline_receiver_syncs` for the payee side.
 
+The legacy **`public.transactions`** table (old user-to-user demo) is **dropped** by [`migrations/supabase_offline_sync_link_timestamps.sql`](migrations/supabase_offline_sync_link_timestamps.sql); the API no longer exposes `/api/v1/transactions` or root `POST /sync`.
+
 ---
 
 ## Data Models

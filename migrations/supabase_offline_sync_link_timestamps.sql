@@ -9,7 +9,7 @@
 -- Uses public.* and timestamp without time zone to align with your current schema.
 -- Re-run safe: IF NOT EXISTS / IF EXISTS / guarded DO blocks.
 --
--- After running: redeploy the API (legacy /api/v1/transactions and /sync removed).
+-- After running: redeploy the API (see README / SERVER_DOCUMENTATION for current routes).
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------

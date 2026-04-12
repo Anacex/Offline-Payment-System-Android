@@ -8,6 +8,8 @@ This guide provides detailed instructions for implementing the Android mobile ap
 
 **Receiver parity (sync):** After a successful BLE receive handshake, the payee gets a **RECEIVED** `LocalTransaction` with the same pattern as the sender: **local encryption at rest**, **hash-chained ledger fields**, **`receipt_hash` over raw JSON**, and an **RSA-PSS** signature over the server’s **`transaction_data`** map (including `direction: RECEIVED` and `receiver_wallet_id`). **`SyncRepository`** sends those rows to **`/api/v1/offline-transactions/sync`**; the backend stores **`offline_receiver_syncs`** for audit and advances **`device_ledger_heads`**, but **does not** apply a second server-side balance credit (sender sync remains authoritative). Sync uses **HTTPS**; the JSON body is the usual **TLS-protected application payload** the API verifies—see **[OFFLINE_TRANSACTION_WORKFLOW.md](OFFLINE_TRANSACTION_WORKFLOW.md)** (“Sync over the network”).
 
+**Server history in the app:** The wallet **History** screen loads **`GET /api/v1/offline-transactions/unified-history?limit=10`** so the user sees both **sent** and **received** server rows with merge metadata (`first_sync_party`, `sync_coverage`), not only the sender-only list from `GET /api/v1/offline-transactions/`.
+
 **Account suspension (demo):** The app shows a full-screen **Account under review** state when the API returns **403** with `detail.code === "ACCOUNT_BLOCKED"` (e.g. after setting `users.account_blocked` in Supabase, or after a failed chained-ledger sync). Step-by-step manual tests: **[OFFLINE_TRANSACTION_WORKFLOW.md § Manual testing](OFFLINE_TRANSACTION_WORKFLOW.md#manual-testing-account-suspension-and-ledger-tail)**.
 
 ---

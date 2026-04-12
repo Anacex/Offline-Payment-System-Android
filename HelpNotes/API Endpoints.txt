@@ -1,9 +1,9 @@
-Endpoint                |  Method  |  Purpose                                               
-------------------------+----------+--------------------------------------------------------
-/users/                 |  GET     |  List users                                            
-/users/                 |  POST    |  Create new user                                       
-/users/{user_id}        |  GET     |  Get user details                                      
-/users/{user_id}/topup  |  POST    |  Top up user's offline wallet (bank credit → wallet)   
-/transactions/          |  GET     |  List all transactions                                 
-/transactions/          |  POST    |  Create transaction (offline claim or direct bank push)
-/sync/                  |  POST    |  Sync a batch of offline transactions from merchant app
+Endpoint                                      | Method | Purpose
+-----------------------------------------------+--------+--------------------------------------------------------
+/api/v1/offline-transactions/sync             | POST   | Batch sync from mobile (SENT + RECEIVED rows)
+/api/v1/offline-transactions/offline-sync     | POST   | Same body/behavior as /sync (alias)
+/api/v1/offline-transactions/unified-history  | GET    | Last N merged sent+received history for current user
+/api/v1/offline-transactions/                 | GET    | Sender-settled rows for user’s offline wallets
+/api/v1/wallets/transfers/history           | GET    | Online wallet transfer history (preload / top-up flows)
+
+Removed: /api/v1/transactions/* (legacy user-to-user demo), POST /sync (root).
