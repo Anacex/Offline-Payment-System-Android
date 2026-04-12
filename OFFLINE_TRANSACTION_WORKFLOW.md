@@ -104,10 +104,10 @@ This simulates “server expected chain ≠ honest client” (e.g. **`LEDGER_INT
 
 **Who**: Payee (Receiver)
 
-**Action**: Payee opens the "Receive" screen (QR Code screen) in the app.
+**Action**: Payee opens **Receive payment** from the wallet or drawer. The app starts **Bluetooth LE** advertising and, **after the sender’s phone connects**, shows the **payee identity QR** on the same screen (`BleReceiverReadyScreen` + `PayeeIdentityQrPanel`). There is **no separate “My QR Code”** menu entry; the ID QR is only shown in this receive flow.
 
 **What Happens**:
-1. App generates a **Payee Identity QR Code** containing:
+1. App generates a **Payee Identity QR Code** (same JSON as before) containing:
    ```json
    {
      "payeeId": "unique-user-id",
@@ -120,8 +120,8 @@ This simulates “server expected chain ≠ honest client” (e.g. **`LEDGER_INT
 2. QR code is displayed on the payee's device screen.
 
 **Technical Implementation**:
-- **File**: `Android-App/app/src/main/java/com/offlinepayment/ui/qr/QRCodeScreen.kt`
-- **Method**: `QRCodeHelper.createPayeeQR(payeeId, payeeName, deviceId)`
+- **Files**: `Android-App/app/src/main/java/com/offlinepayment/ui/ble/BleReceiverReadyScreen.kt` (BLE + when to show QR), `Android-App/app/src/main/java/com/offlinepayment/ui/qr/QRCodeScreen.kt` (contains **`PayeeIdentityQrPanel`** — payee QR UI; the old standalone `QRCodeScreen` composable was removed)
+- **Method**: `QRCodeHelper.createPayeeQR(...)` (used inside `PayeeIdentityQrPanel`)
 - **Backend Endpoint**: `POST /api/v1/wallets/qr-code` (generates same format)
 - **QR Format**: Direct JSON string (not Base64 encoded)
 
@@ -568,7 +568,8 @@ For production, consider adding:
 - `Android-App/app/src/main/java/com/offlinepayment/data/local/LocalTransaction.kt`
 
 **UI Screens**:
-- `Android-App/app/src/main/java/com/offlinepayment/ui/qr/QRCodeScreen.kt` (Step 1: Payee generates QR)
+- `Android-App/app/src/main/java/com/offlinepayment/ui/ble/BleReceiverReadyScreen.kt` (Receive payment: BLE + payee ID QR after sender connects)
+- `Android-App/app/src/main/java/com/offlinepayment/ui/qr/QRCodeScreen.kt` (`PayeeIdentityQrPanel` — payee identity QR widget only)
 - `Android-App/app/src/main/java/com/offlinepayment/ui/SendPaymentScreen.kt` (Step 2 & 3: Payer scans, confirms, generates)
 - `Android-App/app/src/main/java/com/offlinepayment/ui/qr/QRScannerScreen.kt` (Step 2: Payee QR scanner)
 - `Android-App/app/src/main/java/com/offlinepayment/ui/qr/TransactionQRScannerScreen.kt` (Step 4: Transaction QR scanner)
@@ -600,14 +601,15 @@ For production, consider adding:
 │  (Receiver) │
 └──────┬──────┘
        │
-       │ Step 1: Opens "Receive" screen
-       │ Generates Payee QR: {payeeId, payeeName, deviceId, nonce}
+       │ Step 1: Receive payment (BLE) — advertise, sender connects
+       │ Then shows Payee QR: {payeeId, payeeName, deviceId, nonce, …}
        │
        ▼
-┌─────────────────────┐
-│  Payee QR Display   │
-│  (QRCodeScreen)     │
-└──────────┬──────────┘
+┌─────────────────────────────┐
+│  Payee QR on receive screen │
+│  (BleReceiverReadyScreen +  │
+│   PayeeIdentityQrPanel)     │
+└──────────┬────────────────┘
            │
            │ Payer scans QR
            │
