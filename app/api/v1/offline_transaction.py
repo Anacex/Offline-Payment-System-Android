@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Tuple
 import hashlib
 import json
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from app.core.db import get_db
@@ -28,6 +29,27 @@ router = APIRouter(
     prefix="/api/v1/offline-transactions",
     tags=["offline-transactions"],
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_device_timestamp(ts_raw: object) -> datetime:
+    """
+    Parse mobile timestamps (e.g. java.time.Instant.toString(), often with 'Z') into
+    naive UTC wall times for TIMESTAMP WITHOUT TIME ZONE columns.
+    """
+    if ts_raw is None:
+        return datetime.utcnow()
+    s = str(ts_raw).strip()
+    if not s:
+        return datetime.utcnow()
+    try:
+        d = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.utcnow()
+    if d.tzinfo is not None:
+        d = d.astimezone(timezone.utc).replace(tzinfo=None)
+    return d
 
 
 # Must match Android [com.offlinepayment.security.OfflineLedgerChain.GENESIS_PREV_HASH].
@@ -340,11 +362,7 @@ def _sync_one_receiver_row(
         )
         return
 
-    ts_raw = str(transaction_data.get("timestamp", "")).strip()
-    try:
-        created_dev = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-    except ValueError:
-        created_dev = datetime.utcnow()
+    created_dev = _parse_device_timestamp(transaction_data.get("timestamp"))
 
     row = OfflineReceiverSync(
         user_id=current_user.id,
@@ -736,7 +754,7 @@ def sync_offline_transactions(
                 receipt_hash=receipt.get("receipt_hash", ""),
                 receipt_data=json.dumps(receipt) if receipt else "{}",
                 status="synced",
-                created_at_device=datetime.fromisoformat(transaction_data.get("timestamp", datetime.utcnow().isoformat())),
+                created_at_device=_parse_device_timestamp(transaction_data.get("timestamp")),
                 synced_at=datetime.utcnow(),
                 device_fingerprint=tx_data.get("device_fingerprint")
             )
@@ -794,8 +812,9 @@ def sync_offline_transactions(
     # Commit all changes
     try:
         db.commit()
-    except Exception as e:
+    except Exception:
         db.rollback()
+        logger.exception("offline-transactions sync batch commit failed")
         # If commit fails, mark all as failed
         for result in results:
             if result["result"] == "synced":
