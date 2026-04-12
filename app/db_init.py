@@ -1,7 +1,15 @@
 # app/db_init.py
 from app.core.db import engine, Base
 # import models so they are registered on the Base metadata
-from app.models import User, Wallet, OfflineTransaction, WalletTransfer, DeviceLedgerHead, Transaction, OtpChallenge
+from app.models import (
+    User,
+    Wallet,
+    OfflineTransaction,
+    OfflineReceiverSync,
+    WalletTransfer,
+    DeviceLedgerHead,
+    OtpChallenge,
+)
 from app.models_refresh_token import RefreshToken
 
 def init():
@@ -14,8 +22,8 @@ def init():
     print("  - wallets")
     print("  - wallet_transfers")
     print("  - offline_transactions")
+    print("  - offline_receiver_syncs")
     print("  - device_ledger_heads")
-    print("  - transactions")
     print("  - refresh_tokens")
     print("  - otp_challenges")
     print("")

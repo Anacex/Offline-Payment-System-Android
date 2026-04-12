@@ -6,10 +6,8 @@ from slowapi.errors import RateLimitExceeded
 from app.api.v1.health import router as health_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.user import router as user_router
-from app.api.v1.transaction import router as tx_router
 from app.api.v1.wallet import router as wallet_router
 from app.api.v1.offline_transaction import router as offline_tx_router
-from app.api.v1.sync import router as sync_router
 from app.api.v1.integrity import router as integrity_router
 
 from app.core.config import settings
@@ -60,10 +58,8 @@ app.include_router(integrity_router)
 
 # Protected
 app.include_router(user_router)
-app.include_router(tx_router)
 app.include_router(wallet_router)
 app.include_router(offline_tx_router)
-app.include_router(sync_router)
 
 from app.db_init import Base, engine
 from sqlalchemy.orm import Session

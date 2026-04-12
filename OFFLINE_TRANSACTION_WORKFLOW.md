@@ -411,6 +411,25 @@ CREATE TABLE local_transactions (
 
 ---
 
+## Server sync, Supabase, and two tables
+
+The API persists offline payments in **two** Postgres tables (same DB as `DATABASE_URL`; if that URL is your Supabase pooler, both tables appear in the Supabase SQL editor):
+
+| Table | Written when | Role |
+|--------|----------------|------|
+| `offline_transactions` | Payer’s device POSTs **SENT** (`direction` absent on payload) | **Authoritative settlement**: creates the row, deducts sender offline wallet on server, credits receiver offline wallet if `receiver_public_key` matches a registered wallet. |
+| `offline_receiver_syncs` | Payee’s device POSTs **RECEIVED** | **Receiver attestation / audit**: records the payee’s signed view of the same payment `nonce`. **Does not** move balances; the sender’s row remains authoritative for money movement. |
+
+**Who synced first?** Compare server receipt times: `offline_transactions.created_at` vs `offline_receiver_syncs.created_at` for the same `nonce` / `payment_nonce`. The API `GET /api/v1/offline-transactions/unified-history` returns `first_sync_party` (`sender` \| `receiver`) and `sync_coverage` (`sender_only` \| `receiver_only` \| `both`).
+
+**If the receiver syncs first**, their row exists in `offline_receiver_syncs` only until the payer syncs; it is **not** dropped. When the payer syncs later, `offline_transactions` is created and balances are applied. Link columns (after migration `migrations/supabase_offline_sync_link_timestamps.sql`): `offline_transactions.receiver_attestation_at`, `offline_receiver_syncs.sender_settlement_recorded_at`.
+
+**If the sender syncs first**, then the receiver syncs: a second row is added to `offline_receiver_syncs`. Duplicate receiver sync for the same user+nonce is idempotent (existing row returns success).
+
+**Supabase “empty” while the app says synced:** Ensure production `DATABASE_URL` points at that Supabase instance (not Render’s internal Postgres). Receiver-only activity never appears in `offline_transactions` until the payer syncs—check `offline_receiver_syncs` for the payee side.
+
+---
+
 ## Data Models
 
 ### PayeeQRPayload (Step 1)

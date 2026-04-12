@@ -68,6 +68,8 @@ class OfflineTransaction(Base):
     device_fingerprint = Column(String(128), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    # When the payee later posts RECEIVED attestation (offline_receiver_syncs), server sets this timestamp.
+    receiver_attestation_at = Column(DateTime, nullable=True)
     
     # Relationships
     sender_wallet = relationship("Wallet", foreign_keys=[sender_wallet_id])
@@ -103,6 +105,8 @@ class OfflineReceiverSync(Base):
     device_fingerprint = Column(String(128), nullable=True)
     created_at_device = Column(DateTime, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    # When the payer later posts SENT settlement (offline_transactions), server sets this on matching nonce rows.
+    sender_settlement_recorded_at = Column(DateTime, nullable=True)
 
     receiver_wallet = relationship("Wallet", foreign_keys=[receiver_wallet_id])
 

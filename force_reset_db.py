@@ -1,42 +1,28 @@
 """
-Force reset database - Drop all tables manually and recreate.
+Force reset database — drop all ORM-registered tables and recreate.
 """
 
-from app.core.db import engine
-from sqlalchemy import text
-
-print("Force dropping all tables...")
-
-with engine.connect() as conn:
-    # Drop tables in correct order (respecting foreign keys)
-    conn.execute(text("DROP TABLE IF EXISTS wallet_transfers CASCADE"))
-    conn.execute(text("DROP TABLE IF EXISTS offline_transactions CASCADE"))
-    conn.execute(text("DROP TABLE IF EXISTS wallets CASCADE"))
-    conn.execute(text("DROP TABLE IF EXISTS transactions CASCADE"))
-    conn.execute(text("DROP TABLE IF EXISTS refresh_tokens CASCADE"))
-    conn.execute(text("DROP TABLE IF EXISTS users CASCADE"))
-    conn.commit()
-    print("All tables dropped successfully!")
-
-print("\nRecreating tables with correct schema...")
-
-from app.core.db import Base
-from app.models import User, Wallet, OfflineTransaction, WalletTransfer, Transaction
+from app.core.db import engine, Base
+from app.models import (
+    User,
+    Wallet,
+    OfflineTransaction,
+    OfflineReceiverSync,
+    WalletTransfer,
+    DeviceLedgerHead,
+    OtpChallenge,
+)
 from app.models_refresh_token import RefreshToken
 
+print("Dropping all registered tables...")
+Base.metadata.drop_all(bind=engine)
+print("Recreating...")
 Base.metadata.create_all(bind=engine)
+print("SUCCESS: Database recreated.")
 
-print("\nSUCCESS: Database recreated with correct schema!")
-
-# Verify
 from sqlalchemy import inspect
+
 inspector = inspect(engine)
-
-print("\nVerifying 'users' table columns:")
-columns = inspector.get_columns('users')
-for col in columns:
-    print(f"  - {col['name']}: {col['type']}")
-
-print("\nAll tables:")
-for table in inspector.get_table_names():
+print("\nTables:")
+for table in sorted(inspector.get_table_names()):
     print(f"  - {table}")

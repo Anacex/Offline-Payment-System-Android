@@ -11,8 +11,7 @@ import hashlib
 import json
 from decimal import Decimal
 
-from app.models.offline_transaction import OfflineTransaction
-from app.models.wallet import Wallet
+from app.models.wallet import Wallet, OfflineTransaction
 
 
 class ReplayAttackDefense:

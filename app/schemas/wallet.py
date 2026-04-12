@@ -111,6 +111,32 @@ class OfflineTransactionSync(BaseModel):
     transactions: list[dict]  # List of offline transaction data with signatures
 
 
+class UnifiedOfflineHistoryItem(BaseModel):
+    """
+    One logical offline payment for the current user, merging sender settlement (offline_transactions)
+    and receiver attestation (offline_receiver_syncs) by shared nonce.
+    """
+
+    nonce: str
+    tx_id: Optional[str] = None
+    amount: str
+    currency: str
+    perspective: Literal["sent", "received"]
+    payer_id: Optional[str] = None
+    payee_id: Optional[str] = None
+    offline_transaction_id: Optional[int] = None
+    receiver_sync_id: Optional[int] = None
+    sender_synced_at_server: Optional[datetime] = None
+    receiver_synced_at_server: Optional[datetime] = None
+    first_sync_party: Optional[Literal["sender", "receiver"]] = None
+    sync_coverage: Literal["sender_only", "receiver_only", "both"]
+    receiver_attestation_at: Optional[datetime] = None
+    sender_settlement_recorded_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ReceiptVerification(BaseModel):
     """Schema for verifying transaction receipt."""
     receipt_data: dict

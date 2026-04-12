@@ -17,8 +17,11 @@ from app.core.crypto import CryptoManager
 from app.models.user import User
 from app.models.wallet import Wallet, OfflineTransaction, OfflineReceiverSync, DeviceLedgerHead
 from app.schemas.wallet import (
-    OfflineTransactionCreate, OfflineTransactionRead,
-    OfflineTransactionSync, ReceiptVerification
+    OfflineTransactionCreate,
+    OfflineTransactionRead,
+    OfflineTransactionSync,
+    ReceiptVerification,
+    UnifiedOfflineHistoryItem,
 )
 
 router = APIRouter(
@@ -129,6 +132,28 @@ def _get_expected_ledger_state(db: Session, user_id: int, device_fp: str) -> Tup
     return (GENESIS_PREV_HASH, 1)
 
 
+def _link_receiver_attestation_to_sender_row(db: Session, nonce: str) -> None:
+    """If sender settlement row exists for this nonce, record when receiver attestation arrived."""
+    ot = db.query(OfflineTransaction).filter(OfflineTransaction.nonce == nonce).first()
+    if ot is not None and ot.receiver_attestation_at is None:
+        ot.receiver_attestation_at = datetime.utcnow()
+        db.add(ot)
+
+
+def _link_sender_settlement_to_receiver_rows(db: Session, nonce: str) -> None:
+    """When sender settlement lands, mark matching receiver attestation rows with settlement time."""
+    now = datetime.utcnow()
+    rows = (
+        db.query(OfflineReceiverSync)
+        .filter(OfflineReceiverSync.payment_nonce == nonce)
+        .all()
+    )
+    for rs in rows:
+        if rs.sender_settlement_recorded_at is None:
+            rs.sender_settlement_recorded_at = now
+            db.add(rs)
+
+
 def _persist_ledger_head(db: Session, user_id: int, device_fp: str, entry_hash: str, sequence: int) -> None:
     key = (device_fp or "").strip()
     row = (
@@ -202,6 +227,7 @@ def _sync_one_receiver_row(
         .first()
     )
     if existing:
+        _link_receiver_attestation_to_sender_row(db, nonce)
         results.append(
             {
                 "transaction_id": existing.id,
@@ -347,6 +373,8 @@ def _sync_one_receiver_row(
             int(tx_data.get("ledger_sequence")),
         )
         db.flush()
+
+    _link_receiver_attestation_to_sender_row(db, nonce)
 
     results.append(
         {
@@ -717,6 +745,7 @@ def sync_offline_transactions(
             db.flush()  # Flush to get the transaction ID
             
             transaction_id = offline_tx.id
+            _link_sender_settlement_to_receiver_rows(db, str(nonce))
 
             if _ledger_payload_status(tx_data) == "full":
                 _persist_ledger_head(
@@ -865,6 +894,154 @@ def list_offline_transactions(
     ).limit(limit).all()
     
     return transactions
+
+
+@router.get("/unified-history", response_model=list[UnifiedOfflineHistoryItem])
+def list_unified_offline_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    limit: int = 10,
+):
+    """
+    Last N offline payments involving the current user, merging:
+    - Sender settlement rows (offline_transactions) when the user sent PKR offline.
+    - Receiver attestation rows (offline_receiver_syncs) when the user received.
+
+    Also reports whether one or both parties have synced globally (same nonce) and who synced first
+    by server receipt time (created_at).
+    """
+    lim = min(max(limit, 1), 50)
+    user_wallet_ids = [
+        w.id
+        for w in db.query(Wallet)
+        .filter(
+            Wallet.user_id == current_user.id,
+            Wallet.wallet_type == "offline",
+        )
+        .all()
+    ]
+
+    recent_ot = (
+        db.query(OfflineTransaction)
+        .filter(OfflineTransaction.sender_wallet_id.in_(user_wallet_ids))
+        .order_by(OfflineTransaction.created_at.desc())
+        .limit(120)
+        .all()
+    )
+    recent_rs = (
+        db.query(OfflineReceiverSync)
+        .filter(OfflineReceiverSync.user_id == current_user.id)
+        .order_by(OfflineReceiverSync.created_at.desc())
+        .limit(120)
+        .all()
+    )
+
+    merged: dict[str, dict] = {}
+    for ot in recent_ot:
+        merged.setdefault(ot.nonce, {})["ot"] = ot
+    for rs in recent_rs:
+        merged.setdefault(rs.payment_nonce, {})["rs"] = rs
+
+    def activity_time(n: str) -> datetime:
+        e = merged[n]
+        times = []
+        if e.get("ot") is not None:
+            times.append(e["ot"].created_at)
+        if e.get("rs") is not None:
+            times.append(e["rs"].created_at)
+        return max(times)
+
+    ordered_nonces = sorted(merged.keys(), key=activity_time, reverse=True)[:lim]
+
+    if not ordered_nonces:
+        return []
+
+    ot_by_n = {
+        r.nonce: r
+        for r in db.query(OfflineTransaction)
+        .filter(OfflineTransaction.nonce.in_(ordered_nonces))
+        .all()
+    }
+    rs_rows = (
+        db.query(OfflineReceiverSync)
+        .filter(OfflineReceiverSync.payment_nonce.in_(ordered_nonces))
+        .all()
+    )
+    rs_by_n: dict[str, OfflineReceiverSync] = {}
+    for r in rs_rows:
+        cur = rs_by_n.get(r.payment_nonce)
+        if cur is None or r.created_at < cur.created_at:
+            rs_by_n[r.payment_nonce] = r
+
+    out: list[UnifiedOfflineHistoryItem] = []
+    for nonce in ordered_nonces:
+        entry = merged[nonce]
+        ot_user = entry.get("ot")
+        rs_user = entry.get("rs")
+        ot_g = ot_by_n.get(nonce)
+        rs_g = rs_by_n.get(nonce)
+
+        if ot_user is not None:
+            perspective = "sent"
+            amount = ot_user.amount
+            currency = ot_user.currency
+            offline_transaction_id = ot_user.id
+            receiver_sync_id = (rs_user.id if rs_user is not None else None) or (
+                rs_g.id if rs_g is not None else None
+            )
+            payer_id = rs_g.payer_id if rs_g is not None else None
+            payee_id = rs_g.payee_id if rs_g is not None else None
+            tx_id = rs_g.tx_id if rs_g is not None else None
+        elif rs_user is not None:
+            perspective = "received"
+            amount = rs_user.amount
+            currency = rs_user.currency
+            offline_transaction_id = ot_g.id if ot_g is not None else None
+            receiver_sync_id = rs_user.id
+            payer_id = rs_user.payer_id
+            payee_id = rs_user.payee_id
+            tx_id = rs_user.tx_id
+        else:
+            continue
+
+        sender_synced = ot_g.created_at if ot_g is not None else None
+        receiver_synced = rs_g.created_at if rs_g is not None else None
+
+        if ot_g is not None and rs_g is not None:
+            sync_coverage = "both"
+            first_sync_party = "sender" if sender_synced <= receiver_synced else "receiver"
+        elif ot_g is not None:
+            sync_coverage = "sender_only"
+            first_sync_party = "sender"
+        elif rs_g is not None:
+            sync_coverage = "receiver_only"
+            first_sync_party = "receiver"
+        else:
+            continue
+
+        recv_att = ot_g.receiver_attestation_at if ot_g is not None else None
+        sender_settle = rs_g.sender_settlement_recorded_at if rs_g is not None else None
+
+        out.append(
+            UnifiedOfflineHistoryItem(
+                nonce=nonce,
+                tx_id=tx_id,
+                amount=str(amount),
+                currency=str(currency),
+                perspective=perspective,
+                payer_id=payer_id,
+                payee_id=payee_id,
+                offline_transaction_id=offline_transaction_id,
+                receiver_sync_id=receiver_sync_id,
+                sender_synced_at_server=sender_synced,
+                receiver_synced_at_server=receiver_synced,
+                first_sync_party=first_sync_party,
+                sync_coverage=sync_coverage,
+                receiver_attestation_at=recv_att,
+                sender_settlement_recorded_at=sender_settle,
+            )
+        )
+    return out
 
 
 @router.post("/{transaction_id}/confirm", status_code=status.HTTP_200_OK)
