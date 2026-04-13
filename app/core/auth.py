@@ -1,5 +1,5 @@
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from sqlalchemy.orm import Session
@@ -11,7 +11,11 @@ from app.models.user import User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+def get_current_user(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -28,5 +32,14 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.get(User, int(user_id))
     if not user:
         raise credentials_exception
-    raise_if_account_blocked(user)
+    # Allow a blocked user to attempt ledger re-sync to recover.
+    # Other endpoints remain blocked.
+    path = (request.url.path or "").rstrip("/")
+    if getattr(user, "account_blocked", False):
+        allowed = path in (
+            "/api/v1/offline-transactions/sync",
+            "/api/v1/offline-transactions/offline-sync",
+        )
+        if not allowed:
+            raise_if_account_blocked(user)
     return user

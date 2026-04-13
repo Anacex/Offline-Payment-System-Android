@@ -125,12 +125,29 @@ def _verify_ledger_chain(
         return "LEDGER_INTEGRITY_INVALID_HASH_FORMAT"
 
     fp_key = _device_fp_key(tx_data)
+    key = (fp_key or "").strip()
+    head = (
+        db.query(DeviceLedgerHead)
+        .filter(
+            DeviceLedgerHead.user_id == user_id,
+            DeviceLedgerHead.device_fingerprint == key,
+        )
+        .first()
+    )
 
-    exp_prev, exp_seq = _get_expected_ledger_state(db, user_id, fp_key)
-    if prev != exp_prev:
-        return "LEDGER_INTEGRITY_PREV_MISMATCH"
-    if seq != exp_seq:
-        return "LEDGER_INTEGRITY_SEQUENCE_MISMATCH"
+    # Bootstrap rule (prevents false fraud blocks):
+    # If the server has never accepted a ledger head for this (user, device),
+    # accept the client's chain "as-is" (still validating entry hash matches prev|canon).
+    #
+    # This handles the common case where the device built a local chain offline (seq>1)
+    # before the first successful server sync.
+    if head is not None:
+        exp_prev = head.last_entry_hash
+        exp_seq = int(head.last_sequence) + 1
+        if prev != exp_prev:
+            return "LEDGER_INTEGRITY_PREV_MISMATCH"
+        if seq != exp_seq:
+            return "LEDGER_INTEGRITY_SEQUENCE_MISMATCH"
 
     computed = _ledger_entry_hash_hex(prev, canon)
     if computed.lower() != entry.lower():
@@ -809,6 +826,29 @@ def sync_offline_transactions(
                 "error_reason": error_reason
             })
     
+    # If the only reason this user was blocked was a prior ledger mismatch, and this batch
+    # no longer triggers any ledger-integrity failures, clear the block as part of this commit.
+    try:
+        blocked_reason = (current_user.account_blocked_reason or "") if getattr(current_user, "account_blocked", False) else ""
+        had_ledger_fail = any(
+            (r.get("result") == "failed" and str(r.get("error_reason", "")).startswith("LEDGER_INTEGRITY_"))
+            for r in results
+        )
+        if (
+            getattr(current_user, "account_blocked", False)
+            and getattr(current_user, "fraud_review_pending", False)
+            and blocked_reason.startswith("Device ledger integrity check failed during sync")
+            and not had_ledger_fail
+        ):
+            current_user.account_blocked = False
+            current_user.fraud_review_pending = False
+            current_user.account_blocked_reason = None
+            current_user.account_blocked_at = None
+            db.add(current_user)
+    except Exception:
+        # Never fail sync due to unblock logic
+        pass
+
     # Commit all changes (single batch: sender rows, receiver attestations, ledger heads, fraud flags).
     try:
         db.commit()
