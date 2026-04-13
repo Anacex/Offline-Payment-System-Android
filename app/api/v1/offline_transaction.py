@@ -809,18 +809,32 @@ def sync_offline_transactions(
                 "error_reason": error_reason
             })
     
-    # Commit all changes
+    # Commit all changes (single batch: sender rows, receiver attestations, ledger heads, fraud flags).
     try:
         db.commit()
-    except Exception:
+    except Exception as commit_exc:
         db.rollback()
         logger.exception("offline-transactions sync batch commit failed")
-        # If commit fails, mark all as failed
+        # Must not reference the per-row handler's `e` here — it is not in scope (and is cleared after
+        # each `except Exception as e` in Python 3). A NameError here previously left results as
+        # "synced" while nothing was persisted.
+        msg = str(commit_exc)[:500] if commit_exc else "unknown error"
         for result in results:
             if result["result"] == "synced":
                 result["result"] = "failed"
-                result["error_reason"] = f"Database commit failed: {str(e)}"
-    
+                result["error_reason"] = f"Database commit failed: {msg}"
+        logger.warning(
+            "sync batch rolled back after DB commit failure; clients should mark affected rows failed: %s",
+            msg,
+        )
+    else:
+        synced_n = sum(1 for r in results if r.get("result") == "synced")
+        if synced_n:
+            logger.info(
+                "offline-transactions sync committed: %s synced row(s) in this batch (SENT -> offline_transactions; RECEIVED -> offline_receiver_syncs)",
+                synced_n,
+            )
+
     return {
         "message": f"Processed {len(results)} transactions",
         "results": results,
