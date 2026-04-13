@@ -109,8 +109,16 @@ class CryptoManager:
             import base64
             signature = base64.b64decode(signature_b64)
             
-            # Create canonical JSON representation
-            message = json.dumps(transaction_data, sort_keys=True).encode('utf-8')
+            # Create canonical JSON representation.
+            #
+            # IMPORTANT: The Android client signs a minified JSON string (no spaces) with sorted keys.
+            # Python's default json.dumps uses separators (", ", ": ") which introduces spaces and
+            # breaks signature verification even when the correct key is used.
+            message = json.dumps(
+                transaction_data,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
             
             # Verify signature
             public_key.verify(
