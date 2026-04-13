@@ -8,10 +8,13 @@ import secrets
 import json
 from datetime import datetime
 from typing import Tuple, Dict, Any
+import logging
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidSignature
+
+logger = logging.getLogger(__name__)
 
 
 class CryptoManager:
@@ -117,10 +120,20 @@ class CryptoManager:
             #
             # - Legacy server code used Python default separators: (", ", ": ")
             # - Current Android code signs minified JSON: separators=(",", ":")
-            messages = [
-                json.dumps(transaction_data, sort_keys=True, separators=(",", ":")).encode("utf-8"),
-                json.dumps(transaction_data, sort_keys=True).encode("utf-8"),
-            ]
+            # Additionally, some clients may coerce numeric values to strings before signing
+            # (e.g. sender_wallet_id: "5" instead of 5). Try both the raw dict and a stringified form.
+            def _stringify_values(d: Dict[str, Any]) -> Dict[str, Any]:
+                out: Dict[str, Any] = {}
+                for k, v in d.items():
+                    # Preserve booleans; stringify everything else to stabilize cross-language typing.
+                    out[k] = v if isinstance(v, bool) else ("" if v is None else str(v))
+                return out
+
+            candidates = [transaction_data, _stringify_values(transaction_data)]
+            messages = []
+            for c in candidates:
+                messages.append(json.dumps(c, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+                messages.append(json.dumps(c, sort_keys=True).encode("utf-8"))
             
             # Verify signature (try both canonical forms).
             for message in messages:
@@ -141,7 +154,11 @@ class CryptoManager:
         except InvalidSignature:
             return False
         except Exception as e:
-            print(f"Signature verification error: {e}")
+            # Avoid raising from verifier; log for debugging.
+            try:
+                logger.exception("Signature verification error")
+            except Exception:
+                print(f"Signature verification error: {e}")
             return False
     
     @staticmethod
