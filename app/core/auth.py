@@ -41,5 +41,19 @@ def get_current_user(
             "/api/v1/offline-transactions/offline-sync",
         )
         if not allowed:
+            # Recovery allow-list for benign ledger head mismatches.
+            # This prevents a "deadlock" where the app cannot call /auth/me or /wallets
+            # to reach the sync UI flow after a non-tamper ledger mismatch.
+            reason = (getattr(user, "account_blocked_reason", "") or "")
+            benign_ledger_block = (
+                "Device ledger integrity check failed during sync" in reason
+                and ("LEDGER_INTEGRITY_PREV_MISMATCH" in reason or "LEDGER_INTEGRITY_SEQUENCE_MISMATCH" in reason)
+            )
+            if benign_ledger_block:
+                if path in (
+                    "/auth/me",
+                    "/api/v1/wallets",
+                ) or path.startswith("/api/v1/wallets/"):
+                    return user
             raise_if_account_blocked(user)
     return user
