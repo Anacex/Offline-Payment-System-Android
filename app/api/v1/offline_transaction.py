@@ -422,7 +422,31 @@ def _sync_one_receiver_row(
 
 
 def _flag_user_for_ledger_fraud(db: Session, user_id: int, ledger_error_code: str) -> None:
-    """Suspend account and queue for human review when chained-ledger sync fails."""
+    """
+    Suspend account and queue for human review when chained-ledger sync fails.
+
+    IMPORTANT POLICY:
+    - Do NOT auto-block on "head out of sync" signals (prev/sequence mismatch). Those often happen
+      due to benign causes: app reinstall, local DB reset, first-ever server sync after offline use,
+      or device_fingerprint changes.
+    - Only auto-block on strong tamper signals (e.g. entry hash mismatch).
+    """
+    # Benign / recoverable mismatches: reject the row but don't lock the user out.
+    if ledger_error_code in ("LEDGER_INTEGRITY_PREV_MISMATCH", "LEDGER_INTEGRITY_SEQUENCE_MISMATCH"):
+        try:
+            logger.warning(
+                "Ledger head mismatch (no auto-block): %s",
+                ledger_error_code,
+                extra={"user_id": user_id},
+            )
+        except Exception:
+            pass
+        return
+
+    # Incomplete payloads are client bugs, not fraud.
+    if ledger_error_code in ("LEDGER_INTEGRITY_INCOMPLETE_FIELDS", "LEDGER_INTEGRITY_INVALID_SEQUENCE"):
+        return
+
     user = db.get(User, user_id)
     if not user:
         return

@@ -165,7 +165,9 @@ def login_step1(email: str = Body(...), password: str = Body(...), device_finger
     if not user or not security.verify_password(password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    raise_if_account_blocked(user)
+    # NOTE: Do not block login. A blocked user must be able to obtain a token to attempt
+    # recovery via the offline sync endpoint (which is explicitly allowed server-side).
+    # Access to other protected endpoints is still gated by `get_current_user`.
 
     # If email is verified, skip OTP and directly issue tokens
     if user.is_email_verified:
@@ -278,7 +280,8 @@ def login_confirm(email: str = Body(...), otp: str = Body(...), nonce: str = Bod
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    raise_if_account_blocked(user)
+    # NOTE: Do not block login confirmation; blocked users must be able to obtain a token
+    # to attempt recovery via offline sync.
 
     if not user.is_email_verified:
         user.is_email_verified = True
@@ -446,6 +449,7 @@ def token_refresh(refresh_token: str = Body(...), device_fingerprint: str = Body
 
     user = db.query(User).filter(User.id == rt_record.user_id).first()
     if user:
+        # Refresh remains blocked for suspended accounts. They can sign-in again to recover via sync.
         raise_if_account_blocked(user)
 
     # issue new access token
