@@ -129,14 +129,19 @@ class CryptoManager:
                     out[k] = v if isinstance(v, bool) else ("" if v is None else str(v))
                 return out
 
-            candidates = [transaction_data, _stringify_values(transaction_data)]
+            candidates = [
+                ("raw", transaction_data),
+                ("stringified", _stringify_values(transaction_data)),
+            ]
             messages = []
-            for c in candidates:
-                messages.append(json.dumps(c, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-                messages.append(json.dumps(c, sort_keys=True).encode("utf-8"))
+            for label, c in candidates:
+                messages.append((f"{label}/min", json.dumps(c, sort_keys=True, separators=(",", ":")).encode("utf-8")))
+                messages.append((f"{label}/spaced", json.dumps(c, sort_keys=True).encode("utf-8")))
             
             # Verify signature (try both canonical forms).
-            for message in messages:
+            attempted = []
+            for msg_label, message in messages:
+                attempted.append((msg_label, message))
                 try:
                     public_key.verify(
                         signature,
@@ -150,6 +155,28 @@ class CryptoManager:
                     return True
                 except InvalidSignature:
                     continue
+
+            # Safe debug log: do not log signature or raw JSON; only hashes + keys.
+            try:
+                digests = []
+                for msg_label, message in attempted:
+                    digests.append(
+                        {
+                            "candidate": msg_label,
+                            "sha256": hashlib.sha256(message).hexdigest(),
+                            "len": len(message),
+                        }
+                    )
+                logger.warning(
+                    "Signature verification failed (safe debug)",
+                    extra={
+                        "tx_keys": sorted([str(k) for k in (transaction_data or {}).keys()]),
+                        "message_candidates": digests,
+                    },
+                )
+            except Exception:
+                # Never fail verification due to logging
+                pass
             return False
         except InvalidSignature:
             return False
