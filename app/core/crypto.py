@@ -111,26 +111,33 @@ class CryptoManager:
             
             # Create canonical JSON representation.
             #
-            # IMPORTANT: The Android client signs a minified JSON string (no spaces) with sorted keys.
-            # Python's default json.dumps uses separators (", ", ": ") which introduces spaces and
-            # breaks signature verification even when the correct key is used.
-            message = json.dumps(
-                transaction_data,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
+            # Clients have historically differed in whether they sign "pretty" JSON (with spaces)
+            # or minified JSON. Both are semantically identical but not byte-identical, so signature
+            # verification must tolerate both to avoid false negatives.
+            #
+            # - Legacy server code used Python default separators: (", ", ": ")
+            # - Current Android code signs minified JSON: separators=(",", ":")
+            messages = [
+                json.dumps(transaction_data, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+                json.dumps(transaction_data, sort_keys=True).encode("utf-8"),
+            ]
             
-            # Verify signature
-            public_key.verify(
-                signature,
-                message,
-                padding.PSS(
-                    mgf=padding.MGF1(hashes.SHA256()),
-                    salt_length=32,
-                ),
-                hashes.SHA256()
-            )
-            return True
+            # Verify signature (try both canonical forms).
+            for message in messages:
+                try:
+                    public_key.verify(
+                        signature,
+                        message,
+                        padding.PSS(
+                            mgf=padding.MGF1(hashes.SHA256()),
+                            salt_length=32,
+                        ),
+                        hashes.SHA256(),
+                    )
+                    return True
+                except InvalidSignature:
+                    continue
+            return False
         except InvalidSignature:
             return False
         except Exception as e:
