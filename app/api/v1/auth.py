@@ -1,5 +1,5 @@
 # app/api/v1/auth.py
-from fastapi import APIRouter, Depends, HTTPException, status, Body, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Request, Header
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
@@ -458,9 +458,15 @@ def token_refresh(refresh_token: str = Body(...), device_fingerprint: str = Body
 
 # Get current user info
 @router.get("/me")
-def get_current_user_info(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_current_user_info(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    x_device_fingerprint: str = Header(None),
+):
     """Returns current authenticated user's information including email verification status and wallet balance"""
     from app.models.wallet import Wallet
+    from app.models.wallet import DeviceLedgerHead
+    from app.api.v1.offline_transaction import GENESIS_PREV_HASH
     from decimal import Decimal
     
     # Get user's wallet (only one wallet per user)
@@ -471,6 +477,20 @@ def get_current_user_info(user: User = Depends(get_current_user), db: Session = 
     
     # Get wallet balance (user has only one wallet)
     wallet_balance = Decimal(str(wallet.balance)) if wallet else Decimal("0.00")
+
+    # Seed the device ledger chain for fresh installs:
+    # return the server-expected (prev_hash, next_sequence) for this (user, device_fingerprint).
+    df = (x_device_fingerprint or "").strip()
+    head = (
+        db.query(DeviceLedgerHead)
+        .filter(
+            DeviceLedgerHead.user_id == user.id,
+            DeviceLedgerHead.device_fingerprint == df,
+        )
+        .first()
+    )
+    ledger_prev_hash = head.last_entry_hash if head is not None else GENESIS_PREV_HASH
+    ledger_next_sequence = int(head.last_sequence) + 1 if head is not None else 1
     
     return {
         "id": user.id,
@@ -479,7 +499,9 @@ def get_current_user_info(user: User = Depends(get_current_user), db: Session = 
         "phone": user.phone,
         "emailVerified": user.is_email_verified,
         "totalBalance": float(wallet_balance),
-        "offlineBalance": float(wallet_balance)  # Same as total since user has only one wallet
+        "offlineBalance": float(wallet_balance),  # Same as total since user has only one wallet
+        "deviceLedgerPrevHash": ledger_prev_hash,
+        "deviceLedgerNextSequence": ledger_next_sequence,
     }
 
 # Logout (revoke refresh token)

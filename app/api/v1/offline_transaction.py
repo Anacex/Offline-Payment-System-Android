@@ -151,6 +151,14 @@ def _verify_ledger_chain(
 
     computed = _ledger_entry_hash_hex(prev, canon)
     if computed.lower() != entry.lower():
+        # IMPORTANT: if the server has never accepted a head for this (user, device_fingerprint),
+        # a mismatch is more likely a benign client mismatch (e.g., app reinstall changed the
+        # fingerprint, app version changed canonicalization, or a client bug) than a proven fraud.
+        #
+        # We still reject the row (tamper-evident), but downstream policy should NOT auto-block
+        # on first-seen devices. See _flag_user_for_ledger_fraud.
+        if head is None:
+            return "LEDGER_INTEGRITY_HASH_MISMATCH_FIRST_SEEN_DEVICE"
         return "LEDGER_INTEGRITY_HASH_MISMATCH"
 
     return None
@@ -445,6 +453,10 @@ def _flag_user_for_ledger_fraud(db: Session, user_id: int, ledger_error_code: st
 
     # Incomplete payloads are client bugs, not fraud.
     if ledger_error_code in ("LEDGER_INTEGRITY_INCOMPLETE_FIELDS", "LEDGER_INTEGRITY_INVALID_SEQUENCE"):
+        return
+
+    # First-seen device mismatches are not strong fraud signals (often reinstall / fingerprint drift / client bug).
+    if ledger_error_code in ("LEDGER_INTEGRITY_HASH_MISMATCH_FIRST_SEEN_DEVICE",):
         return
 
     user = db.get(User, user_id)

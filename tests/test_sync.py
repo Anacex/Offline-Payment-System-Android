@@ -625,7 +625,48 @@ def test_sync_ledger_hash_mismatch(client: TestClient, test_user_with_wallets):
     body = response.json()
     assert body["total_synced"] == 0
     assert body["total_failed"] == 1
-    assert body["results"][0]["error_reason"] == "LEDGER_INTEGRITY_HASH_MISMATCH"
+    # When the server has never seen this device_fingerprint, mismatches are treated as non-blocking.
+    assert body["results"][0]["error_reason"] in (
+        "LEDGER_INTEGRITY_HASH_MISMATCH_FIRST_SEEN_DEVICE",
+        "LEDGER_INTEGRITY_HASH_MISMATCH",
+    )
+
+
+@pytest.mark.unit
+def test_sync_ledger_hash_mismatch_first_seen_device_does_not_block(
+    client: TestClient, test_user_with_wallets, db_session
+):
+    """A first-seen device hash mismatch should fail the row but NOT suspend the account."""
+    from app.models.user import User
+
+    headers = get_auth_headers(client, test_user_with_wallets, unique_device=True)
+    offline_wallet = test_user_with_wallets["offline_wallet"]
+
+    transaction_data = create_test_transaction_data(
+        offline_wallet.id,
+        "receiver_public_key_123",
+        50.00,
+    )
+    signature = CryptoManager.sign_transaction(transaction_data, offline_wallet.private_key_encrypted)
+    sync_req = create_sync_transaction_request(transaction_data, signature)
+    canon = '{"ledger":"first_seen_bad"}'
+    sync_req["device_fingerprint"] = "new_device_after_reinstall"
+    sync_req["ledger_prev_hash"] = GENESIS_PREV_HASH
+    sync_req["ledger_sequence"] = 1
+    sync_req["integrity_canonical_json"] = canon
+    sync_req["ledger_entry_hash"] = "f" * 64
+
+    response = client.post("/api/v1/offline-transactions/sync", json={"transactions": [sync_req]}, headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_failed"] == 1
+    assert body["results"][0]["error_reason"] == "LEDGER_INTEGRITY_HASH_MISMATCH_FIRST_SEEN_DEVICE"
+
+    uid = test_user_with_wallets["user"].id
+    db_session.expire_all()
+    user = db_session.query(User).filter(User.id == uid).first()
+    assert user.account_blocked is False
+    assert user.fraud_review_pending is False
 
 
 @pytest.mark.unit
